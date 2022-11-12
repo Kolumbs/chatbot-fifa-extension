@@ -18,7 +18,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
         url="https://github.com/Kolumbs/chatbot-fifa-extension",
         packages=["chatbot_fifa_extension"],
         install_requires=[
-            "zoozl",
+            "chatbot",
         ],
         python_requires=">=3.10",
 )
