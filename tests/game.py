@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from zoozl.chat.api import Package
+from chatbot import Package
 
 from chatbot_fifa_extension import FIFAGame
 

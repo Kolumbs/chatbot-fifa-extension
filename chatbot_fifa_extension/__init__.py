@@ -1,5 +1,5 @@
 """Package allows to extend a chatbot with FIFA World Cup results prediction game"""
-from zoozl.chat.api import Interface, Message
+from chatbot import Interface, Message
 
 
 class FIFAGame(Interface):
