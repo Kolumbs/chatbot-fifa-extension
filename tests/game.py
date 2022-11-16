@@ -76,7 +76,7 @@ class Abstract(unittest.TestCase):
     """Abstract testcase for FIFA extension tests"""
 
     def setUp(self):
-        self.game = FIFAGame(conf={"database_path": ".db.sqlite3"})
+        self.game = FIFAGame(conf={"database_path": "tests/tmp"})
         self.callback = MagicMock()
         self.build_new_pack()
 
