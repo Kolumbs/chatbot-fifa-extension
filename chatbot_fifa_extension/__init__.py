@@ -30,14 +30,20 @@ class FIFAGame(Interface):
 
     def __init__(self, conf):
         Interface.__init__(self, conf)
-        if "database_path" not in conf:
-            raise RuntimeError("FIFAGame requires a database path")
+        if "database_path" not in conf or "administrator" not in conf:
+            msg = "FIFAGame requires a database path and administrator in config"
+            raise RuntimeError(msg)
         url = f'sqlite://{conf["database_path"]}/db'
         self.mem = membank.LoadMemory(url)
         self._is_complete = False
 
     def consume(self, package):
-        if "contest" not in package.conversation.data:
+        if package.message.text == "admin mode":
+            package.conversation.data["admin mode"] = {}
+            package.callback("Please identify yourself")
+        elif "admin mode" in package.conversation.data:
+            self.do_admin(package)
+        elif "contest" not in package.conversation.data:
             package.callback("What is your contest code?")
             package.conversation.data["contest"] = None
         elif not package.conversation.data["contest"]:
@@ -130,3 +136,77 @@ class FIFAGame(Interface):
             self.get_bets(package)
         else:
             package.callback("Nothing to cancel. Enter first bet")
+
+    def do_admin(self, package):
+        """admin mode handling"""
+        admin_conf = package.conversation.data["admin mode"]
+        if not admin_conf:
+            if package.message.text == self.conf["administrator"]:
+                package.callback("You are identified. Commands available")
+                admin_conf["command"] = ""
+                admin_conf["data"] = {}
+            else:
+                package.callback("You are not identified. Please identify")
+        else:
+            if package.message.text == "add players to contest":
+                admin_conf["command"] = "add_player_to_contest"
+            if package.message.text == "predictions":
+                admin_conf["command"] = "predictions"
+            if "command" in admin_conf and admin_conf["command"]:
+                executor = getattr(self, admin_conf["command"])
+                executor(package)
+            else:
+                package.callback("State your admin command")
+
+    def add_player_to_contest(self, package):
+        """add player name to contest"""
+        data = package.conversation.data["admin mode"]["data"]
+        if "done" == package.message.text:
+            package.callback("OK.")
+            package.conversation.data["admin mode"] = {}
+        elif "contest" not in data:
+            package.callback("State name of contest")
+            data["contest"] = ""
+        elif not data["contest"]:
+            data["contest"] = package.message.text
+            contest = self.mem.get.contest(code=package.message.text)
+            if not contest:
+                package.callback("Contest {package.message.text} not found")
+            else:
+                data["contest"] = contest
+                package.callback("Contest is {data['contest'].code}")
+                package.callback("State name of the player to add")
+        else:
+            player = self.mem.get.player(name=package.message.text)
+            if not player:
+                package.callback("Player {package.message.text} does not exist")
+            else:
+                name = player.name
+                if name not in data["contest"].players:
+                    data["contest"].players.append(name)
+                    self.mem.put(data["contest"])
+                package.callback("OK. Added")
+
+    def predictions(self, package):
+        """return predictions of all players within contest"""
+        data = package.conversation.data["admin mode"]["data"]
+        if "contest" not in data:
+            package.callback("For which contest?")
+            data["contest"] = ""
+        elif not data["contest"]:
+            contest = package.message.text
+            contest = self.mem.get.contest(code=contest)
+            if not contest:
+                package.callback("Contest {package.message.text} not found")
+            else:
+                for i in contest.players:
+                    player = self.mem.get.player(name=i)
+                    if player:
+                        text = player.name + " "
+                        if not player.bets[0][1]:
+                            package.callback(text + "missing bets")
+                        else:
+                            text += str(player.bets[0][1][0])
+                            text += ":"
+                            text += str(player.bets[0][1][1])
+                            package.callback(text)

@@ -9,7 +9,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
     setuptools.setup(
         name="chatbot_fifa_extension",
-        version="0.0.3",
+        version="0.0.6",
         author="Juris Kaminskis",
         author_email="juris@zoozl.net",
         description="FIFA World Cup chatbot extension",
@@ -18,7 +18,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
         url="https://github.com/Kolumbs/chatbot-fifa-extension",
         packages=["chatbot_fifa_extension"],
         install_requires=[
-            "chatbot",
+            "chatbot>=0.0.2",
             "membank>=0.4.1",
         ],
         python_requires=">=3.10",

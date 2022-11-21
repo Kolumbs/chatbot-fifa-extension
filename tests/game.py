@@ -76,7 +76,7 @@ class Abstract(unittest.TestCase):
     """Abstract testcase for FIFA extension tests"""
 
     def setUp(self):
-        self.game = FIFAGame(conf={"database_path": "tests/tmp"})
+        self.game = FIFAGame(conf={"database_path": "tests/tmp", "administrator": "yunk"})
         self.callback = MagicMock()
         self.build_new_pack()
 
@@ -96,10 +96,10 @@ class Abstract(unittest.TestCase):
         self.pack.message.text = ask
         self.game.consume(self.pack)
 
-    def register(self, name="Richard", new=False):
+    def register(self, name="Richard", contest="family", new=False):
         """helper function to register player in contest"""
         self.assert_answer("Hello", "What is your contest code?")
-        self.assert_answer("family", "OK. Now please state your name!")
+        self.assert_answer(contest, "OK. Now please state your name!")
         if new:
             msg = f"Nice to meet you {name}"
         else:
@@ -118,16 +118,84 @@ class Abstract(unittest.TestCase):
         """cleans out all previous bets"""
         nothing = call('Nothing to cancel. Enter first bet')
         canceling = call('OK. Canceled previous bet')
+        no_contest = call('Such contest does not exist. Try again')
         timeout = 3 + time.time()
         while True:
             self.make_call("cancel")
             response = self.callback.call_args_list[0]
             self.callback.reset_mock()
-            self.assertIn(response, [nothing, canceling])
-            if response == nothing:
+            self.assertIn(response, [nothing, canceling, no_contest])
+            if response in [nothing, no_contest]:
                 break
             if timeout < time.time():
                 raise RuntimeError("Timeout reached.")
+
+
+class AdminMode(Abstract):
+    """Testcase on entering admin mode"""
+
+    def tearDown(self):
+        pass
+
+    def register_admin(self):
+        """register to admin mode"""
+        self.make_call("Hello")
+        self.make_call("Burgy")
+        self.make_call("admin mode")
+        self.make_call("yunk")
+        self.callback.reset_mock()
+
+    def test(self):
+        """should be possible to enter admin mode"""
+        self.make_call("Hello")
+        self.make_call("Burgy")
+        self.assert_answer("admin mode", "Please identify yourself")
+        self.assert_answer("yunkr", 'You are not identified. Please identify')
+        self.assert_answer("yunk", "You are identified. Commands available")
+
+    def test_add_player(self):
+        """should be possible to add players to contest"""
+        self.register_admin()
+        self.assert_answer("add players to contest", "State name of contest")
+        self.assert_answer("Burgy", "State name of the player to add")
+        self.assert_answer("Richard", "OK. Added")
+        self.assert_answer("Richard", "OK. Added")
+
+    def test_get_results(self):
+        """should be possible to get results of players bets for next game"""
+        self.register_admin()
+        self.assert_answer("predictions", "For which contest?")
+        self.assert_answer("Burgy", "Richard missing bets")
+
+
+class NextGame(AdminMode):
+    """Testcase on next game command"""
+
+    def setUp(self):
+        """add new contest with two players"""
+        Abstract.setUp(self)
+        self.make_call("greet")
+        self.callback.reset_mock()
+        self.make_call("Burgy")
+        no_contest = call('Such contest does not exist. Try again')
+        if self.callback.call_args_list[0] == no_contest:
+            self.make_call("create contest")
+            self.assert_answer("Burgy", "Now please state your name!")
+        self.make_call("Burg 1")
+        self.build_new_pack()
+        self.make_call("greet")
+        self.make_call("Burgy")
+        self.make_call("Burg 2")
+        self.build_new_pack()
+        self.make_call("greet")
+        self.make_call("Burgy")
+        self.callback.reset_mock()
+
+    def test(self):
+        """should be possible to get result predictions of next game"""
+        self.register_admin()
+        self.assert_answer("predictions", "For which contest?")
+        self.assert_answer("Burgy", "Richard missing bets")
 
 
 class Play(Abstract):
