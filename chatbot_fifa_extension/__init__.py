@@ -201,16 +201,16 @@ class FIFAGame(Interface):
             else:
                 admin = self.mem.get.player(name=self.conf["administrator"])
                 index = fifa.bets_complete(admin.bets)
-                text = ""
+                text = admin.bets[index][0] + " "
                 for i in contest.players:
                     player = self.mem.get.player(name=i)
                     if player:
                         text += player.name + " "
-                        if not player.bets[index + 1][1]:
+                        if not player.bets[index][1]:
                             package.callback(text + "missing bets")
                         else:
-                            text += str(player.bets[index + 1][1][0])
+                            text += str(player.bets[index][1][0])
                             text += ":"
-                            text += str(player.bets[index + 1][1][1])
+                            text += str(player.bets[index][1][1])
                         text += " "
                 package.callback(text)

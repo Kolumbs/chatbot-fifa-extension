@@ -165,7 +165,7 @@ class AdminMode(Abstract):
         """should be possible to get results of players bets for next game"""
         self.register_admin()
         self.assert_answer("predictions", "For which contest?")
-        self.assert_answer("Burgy", "Richard missing bets")
+        self.assert_answer("Burgy", "Qatar and Ecuador Richard missing bets")
 
 
 class NextGame(AdminMode):
@@ -195,7 +195,7 @@ class NextGame(AdminMode):
         """should be possible to get result predictions of next game"""
         self.register_admin()
         self.assert_answer("predictions", "For which contest?")
-        self.assert_answer("Burgy", "Richard missing bets")
+        self.assert_answer("Burgy", "Qatar and Ecuador Richard missing bets")
 
 
 class Play(Abstract):
