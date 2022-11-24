@@ -87,14 +87,17 @@ class FIFAGame(Interface):
     def add_player(self, package):
         """creates or restores to existing player"""
         player = self.mem.get.player(name=package.message.text)
-        if player and player.name not in package.conversation.data["contest"].players:
-            package.conversation.data["contest"].players.append(player.name)
-            package.callback(f"Welcome back {player.name}")
-        else:
+        if not player:
             player = memories.Player(name=package.message.text)
             self.mem.put(player)
             package.conversation.data["contest"].players.append(player.name)
+            self.mem.put(package.conversation.data["contest"])
             package.callback(f"Nice to meet you {player.name}")
+        else:
+            if player.name not in package.conversation.data["contest"].players:
+                package.conversation.data["contest"].players.append(player.name)
+                self.mem.put(package.conversation.data["contest"])
+            package.callback(f"Welcome back {player.name}")
         package.conversation.data["player"] = player
         player.next_bet = ""
         self.get_bets(package)
@@ -152,6 +155,8 @@ class FIFAGame(Interface):
                 admin_conf["command"] = "add_player_to_contest"
             if package.message.text == "predictions":
                 admin_conf["command"] = "predictions"
+            if package.message.text == "results":
+                admin_conf["command"] = "results"
             if "command" in admin_conf and admin_conf["command"]:
                 executor = getattr(self, admin_conf["command"])
                 executor(package)
@@ -171,7 +176,7 @@ class FIFAGame(Interface):
             data["contest"] = package.message.text
             contest = self.mem.get.contest(code=package.message.text)
             if not contest:
-                package.callback("Contest {package.message.text} not found")
+                package.callback(f"Contest {package.message.text} not found")
             else:
                 data["contest"] = contest
                 package.callback("Contest is {data['contest'].code}")
@@ -197,7 +202,7 @@ class FIFAGame(Interface):
             contest = package.message.text
             contest = self.mem.get.contest(code=contest)
             if not contest:
-                package.callback("Contest {package.message.text} not found")
+                package.callback(f"Contest {package.message.text} not found")
             else:
                 admin = self.mem.get.player(name=self.conf["administrator"])
                 index = fifa.bets_complete(admin.bets)
@@ -214,3 +219,30 @@ class FIFAGame(Interface):
                             text += str(player.bets[index][1][1])
                         text += " "
                 package.callback(text)
+
+    def results(self, package):
+        """return results of all players within contest"""
+        data = package.conversation.data["admin mode"]["data"]
+        if "contest" not in data:
+            package.callback("For which contest?")
+            data["contest"] = ""
+        elif not data["contest"]:
+            contest = package.message.text
+            contest = self.mem.get.contest(code=contest)
+            if not contest:
+                package.callback(f"Contest {package.message.text} not found")
+            else:
+                admin = self.mem.get.player(name=self.conf["administrator"])
+                index = fifa.bets_complete(admin.bets)
+                players = []
+                for name in contest.players:
+                    player = self.mem.get.player(name=name)
+                    if player.name != self.conf["administrator"]:
+                        players.append(self.mem.get.player(name=name))
+                results = fifa.get_player_results(players, admin.bets, index)
+                results = sorted(
+                    [key + " " + str(value) for key, value in results.items()],
+                    key = lambda x: int(x.split(" ", maxsplit=2)[1]),
+                    reverse = True,
+                )
+                package.callback(" ".join(results))

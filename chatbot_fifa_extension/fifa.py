@@ -221,6 +221,52 @@ class PointsScorer(BaseScorer):
         return subgroups
 
 
+def get_player_results(players, bets, count):
+    """Calculate score for player bets against actual bets with a count of games
+    return dictionary player: points
+    """
+    results = {i.name: 0 for i in players}
+    for i, correct_bet in enumerate(bets[:count]):
+        perfect_bet = False
+        closest_betters = []
+        closest_diff = 100
+        for player in players:
+            bet_status, bet_diff = get_score_bet(correct_bet[1], player.bets[i][1])
+            if bet_status and bet_diff == 0:
+                perfect_bet = True
+                results[player.name] += 6
+            elif bet_status:
+                results[player.name] += 3
+                if bet_diff < closest_diff:
+                    closest_betters = [player.name]
+                    closest_diff = bet_diff
+                elif bet_diff == closest_diff:
+                    closest_betters.append(player.name)
+        if not perfect_bet:
+            if len(closest_betters) == 1:
+                results[closest_betters[0]] += 2
+            else:
+                for player in closest_betters:
+                    results[player] += 1
+    return results
+
+def get_score_bet(actual, prediction):
+    """get a difference between actual and prediction and if winner was correct"""
+    if actual == prediction:
+        return True, 0
+    if actual[0] == actual[1] and prediction[0] == prediction[1]:
+        return True, get_diff(actual, prediction)
+    if actual[0] > actual[1] and prediction[0] > prediction[1]:
+        return True, get_diff(actual, prediction)
+    if actual[0] < actual[1] and prediction[0] < prediction[1]:
+        return True, get_diff(actual, prediction)
+    return False, -1
+
+# pylint: disable=invalid-name
+def get_diff(a, b):
+    """total diff between a and b tuples"""
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
 def get_group_winners(results):
     """Calculate 1st and 2nd place from results and return it
     """

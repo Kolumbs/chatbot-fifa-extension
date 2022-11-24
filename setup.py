@@ -9,7 +9,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
     setuptools.setup(
         name="chatbot_fifa_extension",
-        version="0.0.9",
+        version="0.0.10",
         author="Juris Kaminskis",
         author_email="juris@zoozl.net",
         description="FIFA World Cup chatbot extension",

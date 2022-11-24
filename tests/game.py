@@ -74,15 +74,50 @@ class GroupWinners(unittest.TestCase):
 
 class Abstract(unittest.TestCase):
     """Abstract testcase for FIFA extension tests"""
+    administrator = "yunk"
 
     def setUp(self):
-        self.game = FIFAGame(conf={"database_path": "tests/tmp", "administrator": "yunk"})
+        conf = {"database_path": "tests/tmp", "administrator": self.administrator}
+        self.game = FIFAGame(conf=conf)
         self.callback = MagicMock()
         self.build_new_pack()
 
-    def tearDown(self):
+    def is_valid_contest(self, contest):
+        """checks if contest exists if not returns False"""
+        self.assert_answer("Hello", "What is your contest code?")
+        self.make_call(contest)
+        self.callback.assert_called()
+        called = self.callback.call_args.args[0]
         self.callback.reset_mock()
-        self.cancel_all_bets()
+        self.build_new_pack()
+        return called == 'OK. Now please state your name!'
+
+    def add_players(self, contest, user):
+        """adds players to contest"""
+        if not self.is_valid_contest(contest):
+            self.create_contest(contest)
+        self.assert_answer("Hello", "What is your contest code?")
+        self.assert_answer(contest, 'OK. Now please state your name!')
+        self.make_call(user)
+        self.callback.assert_called()
+        self.callback.reset_mock()
+        self.build_new_pack()
+
+    def add_bets(self, contest, player, bets):
+        """add bets for a player"""
+        self.assert_answer("Hello", "What is your contest code?")
+        self.assert_answer(contest, 'OK. Now please state your name!')
+        self.make_call(player)
+        for bet in bets:
+            self.make_call(f"{bet[0]}:{bet[1]}")
+        self.callback.reset_mock()
+        self.build_new_pack()
+
+    def create_contest(self, contest):
+        """creates new contest"""
+        self.assert_answer("Hello", "What is your contest code?")
+        self.assert_answer("create contest", 'Please state the name of the contest')
+        self.assert_answer(contest, 'OK. New contest created', 'Now please state your name!')
 
     def assert_answer(self, ask, *respond, reset=True):
         """assert that bot responds to ask"""
@@ -114,8 +149,13 @@ class Abstract(unittest.TestCase):
         """builds new package for exchange between chatbot"""
         self.pack = Package(Message(""), Conversation(), self.callback)
 
-    def cancel_all_bets(self):
+    def cancel_all_bets(self, contest, player):
         """cleans out all previous bets"""
+        self.callback.reset_mock()
+        self.build_new_pack()
+        self.assert_answer("Hello", "What is your contest code?")
+        self.assert_answer(contest, 'OK. Now please state your name!')
+        self.assert_answer(player, f"Welcome back {player}")
         nothing = call('Nothing to cancel. Enter first bet')
         canceling = call('OK. Canceled previous bet')
         no_contest = call('Such contest does not exist. Try again')
@@ -129,13 +169,8 @@ class Abstract(unittest.TestCase):
                 break
             if timeout < time.time():
                 raise RuntimeError("Timeout reached.")
-
-
-class AdminMode(Abstract):
-    """Testcase on entering admin mode"""
-
-    def tearDown(self):
-        pass
+        self.callback.reset_mock()
+        self.build_new_pack()
 
     def register_admin(self):
         """register to admin mode"""
@@ -144,6 +179,10 @@ class AdminMode(Abstract):
         self.make_call("admin mode")
         self.make_call("yunk")
         self.callback.reset_mock()
+
+
+class AdminMode(Abstract):
+    """Testcase on entering admin mode"""
 
     def test(self):
         """should be possible to enter admin mode"""
@@ -166,6 +205,34 @@ class AdminMode(Abstract):
         self.register_admin()
         self.assert_answer("predictions", "For which contest?")
         self.assert_answer("Burgy", "Qatar and Ecuador Richard missing bets")
+
+
+class Results(Abstract):
+    """Testcase on results"""
+
+    def setUp(self):
+        AdminMode.setUp(self)
+        self.contest_name = "Yogers"
+        self.add_bets(self.contest_name, self.administrator, [(1,1), (2,1), (3,5), (1,2)])
+        self.users = [
+            ["Yanek", [(1,1), (2,0), (3,6), (1,0)]],
+            ["Ulbek", [(0,0), (3,0), (2,4), (0,1)]],
+            ["Iko", [(1,3), (0,1), (1,0), (2,3)]],
+        ]
+        for user in self.users:
+            self.add_players(self.contest_name, user[0])
+            self.add_bets(self.contest_name, user[0], user[1])
+        self.register_admin()
+
+    def tearDown(self):
+        self.cancel_all_bets(self.contest_name, self.administrator)
+        for i in self.users:
+            self.cancel_all_bets(self.contest_name, i[0])
+
+    def test(self):
+        """results should be calculated"""
+        self.assert_answer("results", "For which contest?")
+        self.assert_answer(self.contest_name, "Yanek 16 Ulbek 13 Iko 4")
 
 
 class NextGame(AdminMode):
@@ -200,15 +267,21 @@ class NextGame(AdminMode):
 
 class Play(Abstract):
     """Testcase on starting to play FIFA Betting Game"""
+    player = "Richard"
+    contest_name = "family"
+
+    def tearDown(self):
+        self.callback.reset_mock()
+        self.cancel_all_bets(self.contest_name, self.player)
 
     def test(self):
         """should be possible to call start of the game"""
         self.assert_answer("Hello", "What is your contest code?")
         self.assert_answer("help", "If you want to create new contest call create contest")
         self.assert_answer("create contest", "Please state the name of the contest")
-        self.assert_answer("family", "Now please state your name!")
+        self.assert_answer(self.contest_name, "Now please state your name!")
         self.assert_answer(
-            "Richard",
+            self.player,
             "Welcome back Richard",
             "What will be result between Qatar and Ecuador?",
         )
@@ -232,9 +305,6 @@ class Play(Abstract):
 
 class Full(Abstract):
     """Test full betting scenario"""
-
-    def tearDown(self):
-        pass
 
     def test(self):
         """one full cycle of bets"""
