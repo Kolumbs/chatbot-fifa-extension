@@ -103,19 +103,34 @@ class FIFAGame(Interface):
         self.get_bets(package)
         self.mem.put(player)
 
+    # pylint: disable=too-many-branches
     def get_bets(self, package):
         """get all bet scores from the player"""
-        bet = fifa.WorldCup(package.conversation.data["player"])
+        admin = self.mem.get.player(name=self.conf["administrator"])
+        bet = fifa.WorldCup(package.conversation.data["player"], admin.bets)
         if not bet.player.next_bet:
-            bet.load_next_bet()
+            if self.conf["administrator"] == package.conversation.data["player"].name:
+                bet.load_next_admin_bet()
+            else:
+                bet.load_next_bet()
             if bet.player.next_bet:
                 bet_call = "What will be result between " + bet.player.next_bet + "?"
                 package.callback(bet_call)
             else:
-                champ = fifa.get_knock_win(bet.player.bets[-1])
-                package.callback(f"Congrats {champ} is your World Cup 2022 Champion!")
-                package.callback("Your bets are finalised! Good luck!!!")
-                self._is_complete = True
+                complete = fifa.bets_complete(admin.bets)
+                if complete < 48:
+                    package.callback("Please wait while group stage ends")
+                elif complete < 56:
+                    package.callback("Please wait while round 16 ends")
+                elif complete < 60:
+                    package.callback("Please wait while quarter finals end")
+                elif complete < 62:
+                    package.callback("Please wait while semi finals end")
+                else:
+                    champ = fifa.get_knock_win(bet.player.bets[-1])
+                    package.callback(f"Congrats {champ} is your World Cup 2022 Champion!")
+                    package.callback("Your bets are finalised! Good luck!!!")
+                    self._is_complete = True
         else:
             if "cancel" in package.message.text:
                 self.cancel_bet(bet, package)
@@ -206,19 +221,26 @@ class FIFAGame(Interface):
             else:
                 admin = self.mem.get.player(name=self.conf["administrator"])
                 index = fifa.bets_complete(admin.bets)
-                text = admin.bets[index][0] + " "
-                for i in contest.players:
-                    player = self.mem.get.player(name=i)
-                    if player:
-                        text += player.name + " "
-                        if not player.bets[index][1]:
-                            package.callback(text + "missing bets")
-                        else:
-                            text += str(player.bets[index][1][0])
-                            text += ":"
-                            text += str(player.bets[index][1][1])
-                        text += " "
-                package.callback(text)
+                text = self._get_predictions(contest.players, admin.bets, index)
+                if 31 < index < 48:
+                    text += self._get_predictions(contest.players, admin.bets, index+1)
+                package.callback(text.strip())
+
+    def _get_predictions(self, players, bet_results, index):
+        """get predictions for players for one game"""
+        text = bet_results[index][0] + " "
+        for i in players:
+            player = self.mem.get.player(name=i)
+            if player:
+                text += player.name + " "
+                if not player.bets[index][1]:
+                    text += "missing bets"
+                else:
+                    text += str(player.bets[index][1][0])
+                    text += ":"
+                    text += str(player.bets[index][1][1])
+                text += " "
+        return text
 
     def results(self, package):
         """return results of all players within contest"""

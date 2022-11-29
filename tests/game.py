@@ -118,6 +118,7 @@ class Abstract(unittest.TestCase):
         self.assert_answer("Hello", "What is your contest code?")
         self.assert_answer("create contest", 'Please state the name of the contest')
         self.assert_answer(contest, 'OK. New contest created', 'Now please state your name!')
+        self.build_new_pack()
 
     def assert_answer(self, ask, *respond, reset=True):
         """assert that bot responds to ask"""
@@ -133,6 +134,8 @@ class Abstract(unittest.TestCase):
 
     def register(self, name="Richard", contest="family", new=False):
         """helper function to register player in contest"""
+        if not self.is_valid_contest(contest):
+            self.create_contest(contest)
         self.assert_answer("Hello", "What is your contest code?")
         self.assert_answer(contest, "OK. Now please state your name!")
         if new:
@@ -149,7 +152,7 @@ class Abstract(unittest.TestCase):
         """builds new package for exchange between chatbot"""
         self.pack = Package(Message(""), Conversation(), self.callback)
 
-    def cancel_all_bets(self, contest, player):
+    def cancel_all_bets(self, player, contest):
         """cleans out all previous bets"""
         self.callback.reset_mock()
         self.build_new_pack()
@@ -200,12 +203,6 @@ class AdminMode(Abstract):
         self.assert_answer("Richard", "OK. Added")
         self.assert_answer("Richard", "OK. Added")
 
-    def test_get_results(self):
-        """should be possible to get results of players bets for next game"""
-        self.register_admin()
-        self.assert_answer("predictions", "For which contest?")
-        self.assert_answer("Burgy", "Qatar and Ecuador Richard missing bets")
-
 
 class Results(Abstract):
     """Testcase on results"""
@@ -225,9 +222,9 @@ class Results(Abstract):
         self.register_admin()
 
     def tearDown(self):
-        self.cancel_all_bets(self.contest_name, self.administrator)
+        self.cancel_all_bets(self.administrator, self.contest_name)
         for i in self.users:
-            self.cancel_all_bets(self.contest_name, i[0])
+            self.cancel_all_bets(i[0], self.contest_name)
 
     def test(self):
         """results should be calculated"""
@@ -235,7 +232,7 @@ class Results(Abstract):
         self.assert_answer(self.contest_name, "Yanek 16 Ulbek 13 Iko 4")
 
 
-class NextGame(AdminMode):
+class NextGame(Abstract):
     """Testcase on next game command"""
 
     def setUp(self):
@@ -262,7 +259,8 @@ class NextGame(AdminMode):
         """should be possible to get result predictions of next game"""
         self.register_admin()
         self.assert_answer("predictions", "For which contest?")
-        self.assert_answer("Burgy", "Qatar and Ecuador Richard missing bets")
+        self.make_call("Burgy")
+        self.assertIn("missing bets", self.callback.call_args[0][0])
 
 
 class Play(Abstract):
@@ -272,7 +270,7 @@ class Play(Abstract):
 
     def tearDown(self):
         self.callback.reset_mock()
-        self.cancel_all_bets(self.contest_name, self.player)
+        self.cancel_all_bets(self.player, self.contest_name)
 
     def test(self):
         """should be possible to call start of the game"""
@@ -303,8 +301,46 @@ class Play(Abstract):
         self.assert_answer("0:2", "What will be result between Senegal and Netherlands?")
 
 
+class Predictions(Abstract):
+    """Tests for predictions command in admin mode"""
+
+    def setUp(self):
+        AdminMode.setUp(self)
+        self.player1 = str(time.time())
+        self.player2 = str(time.time())
+        self.contest = str(time.time())
+        self.create_contest(self.contest)
+        results = [(0,0)] * 32
+        self.add_bets(self.contest, self.player1, results + [(1,1), (2,2)])
+        self.add_bets(self.contest, self.player2, results + [(3,3), (4,4)])
+        self.assertTrue(self.is_valid_contest("admin"))
+
+    def tearDown(self):
+        self.cancel_all_bets(self.administrator, "admin")
+
+    def test(self):
+        """able to get two results for games from 33-48"""
+        self.add_bets("admin", self.administrator, [(0,0)] * 31)
+        msg = f"Portugal and Uruguay {self.player1} 0:0 {self.player2} 0:0"
+        self.assert_prediction(msg)
+        self.add_bets("admin", self.administrator, [(0,0)])
+        msg = f"Netherlands and Qatar {self.player1} 1:1 {self.player2} 3:3"
+        msg += f" Ecuador and Senegal {self.player1} 2:2 {self.player2} 4:4"
+        self.assert_prediction(msg)
+
+    def assert_prediction(self, msg):
+        """assert prediction as per msg"""
+        self.register_admin()
+        self.assert_answer("predictions", "For which contest?")
+        self.assert_answer(self.contest, msg)
+        self.build_new_pack()
+
+
 class Full(Abstract):
     """Test full betting scenario"""
+
+    def tearDown(self):
+        self.cancel_all_bets(self.administrator, "admin")
 
     def test(self):
         """one full cycle of bets"""
@@ -331,7 +367,7 @@ class Full(Abstract):
             ("0:2", "Qatar and Senegal"),
             ("2:0", "Netherlands and Ecuador"),
             ("0:2", "England and United States"),
-            ("5:0", "Tunisia and Australia"),
+            ("0:1", "Tunisia and Australia"),
             ("0:2", "Poland and Saudi Arabia"),
             ("0:2", "France and Denmark"),
             ("2:2", "Argentina and Mexico"),
@@ -346,7 +382,7 @@ class Full(Abstract):
             ("2:0", "Netherlands and Qatar"),
             ("0:2", "Ecuador and Senegal"),
             ("5:0", "Wales and England"),
-            ("0:2", "Iran and United States"),
+            ("2:0", "Iran and United States"),
             ("2:0", "Australia and Denmark"),
             ("0:1", "Tunisia and France"),
             ("0:2", "Poland and Argentina"),
@@ -359,7 +395,8 @@ class Full(Abstract):
             ("1:2", "Korea Republic and Portugal"),
             ("0:2", "Serbia and Switzerland"),
             ("0:2", "Cameroon and Brazil"),
-            ("0:2", "Qatar and Iran"), # Round 16 49
+            ("0:2", "GROUP"),
+            ("0:2", "LOAD_GROUP_STAGE"), # Round 16 49
             ("0:2", "Argentina and Denmark"), # 50
             ("cancel", "Qatar and Iran"), # Try cancelling in middle of group16
             ("0:2", "Argentina and Denmark"), # 50
@@ -370,25 +407,141 @@ class Full(Abstract):
             ("0:2", "Brazil and Ghana"), # 54
             ("0:2", "Belgium and Germany"), # 55
             ("0:2", "Portugal and Serbia"), # 56
-            ("1:2", "Canada and Ghana"), # Quarter-finals 57
-            ("0:2", "Iran and Denmark"), # 58
-            ("0:2", "Germany and Serbia"), # 59
-            ("0:2", "Saudi Arabia and Ecuador"), # 60
-            ("0:2", "Ghana and Denmark"), # Semi-finals
-            ("0:2", "Serbia and Ecuador"),
-            ("0:2", "Ghana and Serbia"),
-            ("0:2", "Denmark and Ecuador"),
+            ("0:2", "LOAD_GROUP_16"), # Round 16 49
+            ("1:2", "Spain and Brazil"), # Quarter-finals 57
+            ("0:2", "Qatar and Argentina"), # 58
+            ("0:2", "Belgium and Portugal"), # 59
+            ("0:2", "France and England"), # 60
+            ("0:2", "LOAD_QFINALS"), # Round 16 49
+            ("0:2", "Spain and Qatar"), # Semi-finals
+            ("0:2", "Belgium and France"),
+            ("0:2", "LOAD_SEMIFINALS"), # Round 16 49
+            ("0:2", "Qatar and France"),
+            ("0:2", "Spain and Belgium"),
             ("2:0", "CHAMP"),
         )
         for score, game in bets:
             with self.subTest(score=score, game=game):
+                if game == "LOAD_GROUP_STAGE":
+                    self.build_new_pack()
+                    self.load_group_stage()
+                    self.register(player)
+                    continue
+                if game == "LOAD_SEMIFINALS":
+                    self.build_new_pack()
+                    self.load_semis()
+                    self.register(player)
+                    continue
+                if game == "LOAD_GROUP_16":
+                    self.build_new_pack()
+                    self.load_group_16()
+                    self.register(player)
+                    continue
+                if game == "LOAD_QFINALS":
+                    self.build_new_pack()
+                    self.load_qfinals()
+                    self.register(player)
+                    continue
                 if game == "DRAW":
                     msg = "Draw in knockout stage is not allowed"
+                elif game == "GROUP":
+                    msg = "Please wait while group stage ends"
                 elif game == "CHAMP":
-                    msg = "Congrats Denmark is your World Cup 2022 Champion!"
+                    msg = "Congrats Spain is your World Cup 2022 Champion!"
                 else:
                     msg = common + game + "?"
                 if score == "cancel":
                     self.assert_answer(score, "OK. Canceled previous bet", msg)
                 else:
                     self.assert_answer(score, msg)
+
+    def load_group_stage(self):
+        """upload results for group 16 matches"""
+        self.assertTrue(self.is_valid_contest("admin"))
+        results_16 = [
+            (2,0),
+            (2,2),
+            (0,2),
+            (0,2),
+            (2,2),
+            (2,0),
+            (0,2),
+            (2,0),
+            (0,2),
+            (0,2),
+            (2,0),
+            (2,0),
+            (0,2),
+            (0,2),
+            (0,2),
+            (2,1),
+            (0,2),
+            (2,0),
+            (0,2),
+            (5,0),
+            (0,2),
+            (0,2),
+            (2,2),
+            (5,0),
+            (0,2),
+            (0,2),
+            (0,2),
+            (1,1),
+            (0,2),
+            (1,1),
+            (2,0),
+            (2,0),
+            (0,2),
+            (5,0),
+            (0,2),
+            (2,0),
+            (0,1),
+            (0,2),
+            (0,2),
+            (2,0),
+            (0,2),
+            (2,0),
+            (0,2),
+            (0,2),
+            (1,2),
+            (0,2),
+            (0,2),
+            (0,2),
+        ]
+        self.add_bets("admin", self.administrator, results_16)
+        self.build_new_pack()
+
+    def load_group_16(self):
+        """load group 16 results"""
+        scores = [
+            (2,0),
+            (2,0),
+            (2,0),
+            (2,0),
+            (2,0),
+            (2,0),
+            (2,0),
+            (2,0),
+        ]
+        self.add_bets("admin", self.administrator, scores)
+        self.build_new_pack()
+
+    def load_qfinals(self):
+        """load quarter finalists"""
+        scores = [
+            (2,0),
+            (2,0),
+            (2,0),
+            (2,0),
+        ]
+        self.add_bets("admin", self.administrator, scores)
+        self.build_new_pack()
+
+    def load_semis(self):
+        """load quarter finalists"""
+        scores = [
+            (2,0),
+            (2,0),
+        ]
+        self.add_bets("admin", self.administrator, scores)
+        self.build_new_pack()

@@ -402,15 +402,19 @@ def remove_previous_bet(bets):
 class WorldCup:
     """FIFA World Cup tournament"""
 
-    def __init__(self, player):
-        """player is an object that will be updated during processing
+    def __init__(self, player, bet_results):
+        """
+        player is an object that will be updated during processing
 
         player.next_bet is an external flag that is changed during object's lifetime
         player.bets is a dictionary that is changed during object's lifetime
+
+        bet_results is a key/value map that contains actual results of the cup
         """
         self.player = player
         if not self.player.bets:
             self.player.bets = add_qualifier_stage(self.player.bets)
+        self.bet_results = bet_results
 
     def get_next_bet(self):
         """returns next available bet"""
@@ -423,6 +427,24 @@ class WorldCup:
         """looks into player.bets and loads next required bet to player.next_bet
         if there is no bet left does nothing
         """
+        bet_count = bets_complete(self.player.bets)
+        bet_results = bets_complete(self.bet_results)
+        if bet_count == 48 and bet_results > 47:
+            new = get_group16_stage(self.bet_results[:48])
+            self.player.bets = self.player.bets[:48] + new
+        elif bet_count == 56 and bet_results > 55:
+            new = get_quarters_stage(self.bet_results[48:56])
+            self.player.bets = self.player.bets[:56] + new
+        elif bet_count == 60 and bet_results > 59:
+            new = get_semis_stage(self.bet_results[56:60])
+            self.player.bets = self.player.bets[:60] + new
+        elif bet_count == 62 and bet_results > 61:
+            new = get_finals_stage(self.bet_results[60:62])
+            self.player.bets = self.player.bets[:62] + new
+        self.player.next_bet = self.get_next_bet()
+
+    def load_next_admin_bet(self):
+        """loads next bet for admin"""
         bet_count = bets_complete(self.player.bets)
         if bet_count == 48:
             self.player.bets = (self.player.bets[:48]
