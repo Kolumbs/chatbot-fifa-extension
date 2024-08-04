@@ -3,7 +3,7 @@ import time
 import unittest
 from unittest.mock import MagicMock, call
 
-from chatbot import Package, Conversation, Message
+from zoozl.chatbot import Package, Conversation, Message
 
 from chatbot_fifa_extension import FIFAGame, fifa
 

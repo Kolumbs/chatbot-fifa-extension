@@ -1,5 +1,5 @@
 # chatbot-fifa-extension
-Extension for chatbot module on FIFA World Cup betting game
+Extension for zoozl chatbot on FIFA World Cup betting game
 
 ## Usage
-This module is an extension module for chatbot
+This module is an extension module for zoozl chatbot

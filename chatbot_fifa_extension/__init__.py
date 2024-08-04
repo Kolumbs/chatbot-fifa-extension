@@ -1,10 +1,10 @@
 """Package allows to extend a chatbot with FIFA World Cup results prediction game"""
-from chatbot import Interface, Message
+from zoozl.chatbot import Interface, Message
 
 import membank
 
-from chatbot_fifa_extension import fifa, memories
-from .exceptions import *
+from . import fifa, memories
+from .exceptions import DrawNotAllowed
 
 
 def is_valid_result(result, callback):
