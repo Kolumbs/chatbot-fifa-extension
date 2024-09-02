@@ -1,4 +1,5 @@
 """Testcases on FIFA Betting Game"""
+
 import time
 import unittest
 from unittest.mock import MagicMock, call
@@ -18,12 +19,12 @@ class GroupWinners(unittest.TestCase):
         # Senegal 6
         # Nethers 9
         results = {
-            'Qatar and Ecuador': [0, 2],
-            'Senegal and Netherlands': [0, 2],
-            'Qatar and Senegal': [0, 2],
-            'Netherlands and Ecuador': [2, 0],
-            'Netherlands and Qatar': [2, 0],
-            'Ecuador and Senegal': [0, 2]
+            "Qatar and Ecuador": [0, 2],
+            "Senegal and Netherlands": [0, 2],
+            "Qatar and Senegal": [0, 2],
+            "Netherlands and Ecuador": [2, 0],
+            "Netherlands and Qatar": [2, 0],
+            "Ecuador and Senegal": [0, 2],
         }
         team1, team2 = fifa.get_group_winners(results)
         self.assertEqual("Netherlands", team1)
@@ -32,12 +33,12 @@ class GroupWinners(unittest.TestCase):
     def test_by_goal_diff(self):
         """win by total goal diff"""
         results = {
-            'Qatar and Ecuador': [0, 2],
-            'Senegal and Netherlands': [0, 1],
-            'Qatar and Senegal': [0, 2],
-            'Netherlands and Ecuador': [0, 2],
-            'Netherlands and Qatar': [2, 0],
-            'Ecuador and Senegal': [0, 2]
+            "Qatar and Ecuador": [0, 2],
+            "Senegal and Netherlands": [0, 1],
+            "Qatar and Senegal": [0, 2],
+            "Netherlands and Ecuador": [0, 2],
+            "Netherlands and Qatar": [2, 0],
+            "Ecuador and Senegal": [0, 2],
         }
         team1, team2 = fifa.get_group_winners(results)
         self.assertEqual("Senegal", team1)
@@ -46,12 +47,12 @@ class GroupWinners(unittest.TestCase):
     def test_by_goals(self):
         """win by total goals"""
         results = {
-            'Qatar and Ecuador': [0, 2],
-            'Senegal and Netherlands': [2, 4],
-            'Qatar and Senegal': [0, 2],
-            'Netherlands and Ecuador': [1, 3],
-            'Netherlands and Qatar': [2, 0],
-            'Ecuador and Senegal': [0, 2]
+            "Qatar and Ecuador": [0, 2],
+            "Senegal and Netherlands": [2, 4],
+            "Qatar and Senegal": [0, 2],
+            "Netherlands and Ecuador": [1, 3],
+            "Netherlands and Qatar": [2, 0],
+            "Ecuador and Senegal": [0, 2],
         }
         team1, team2 = fifa.get_group_winners(results)
         self.assertEqual("Netherlands", team1)
@@ -60,12 +61,12 @@ class GroupWinners(unittest.TestCase):
     def test_by_points_subgroup(self):
         """win by total points in subgroup"""
         results = {
-            'Qatar and Ecuador': [0, 2],
-            'Senegal and Netherlands': [2, 4],
-            'Qatar and Senegal': [0, 2],
-            'Netherlands and Ecuador': [0, 2],
-            'Netherlands and Qatar': [2, 0],
-            'Ecuador and Senegal': [0, 2]
+            "Qatar and Ecuador": [0, 2],
+            "Senegal and Netherlands": [2, 4],
+            "Qatar and Senegal": [0, 2],
+            "Netherlands and Ecuador": [0, 2],
+            "Netherlands and Qatar": [2, 0],
+            "Ecuador and Senegal": [0, 2],
         }
         team1, team2 = fifa.get_group_winners(results)
         self.assertEqual("Netherlands", team1)
@@ -74,11 +75,18 @@ class GroupWinners(unittest.TestCase):
 
 class Abstract(unittest.TestCase):
     """Abstract testcase for FIFA extension tests"""
+
     administrator = "yunk"
 
     def setUp(self):
-        conf = {"database_path": "tests/tmp", "administrator": self.administrator}
+        conf = {
+            "chatbot_fifa_extension": {
+                "database_path": "tests/tmp",
+                "administrator": self.administrator,
+            }
+        }
         self.game = FIFAGame(conf=conf)
+        self.game.load(self.game)
         self.callback = MagicMock()
         self.build_new_pack()
 
@@ -90,14 +98,14 @@ class Abstract(unittest.TestCase):
         called = self.callback.call_args.args[0]
         self.callback.reset_mock()
         self.build_new_pack()
-        return called == 'OK. Now please state your name!'
+        return called == "OK. Now please state your name!"
 
     def add_players(self, contest, user):
         """adds players to contest"""
         if not self.is_valid_contest(contest):
             self.create_contest(contest)
         self.assert_answer("Hello", "What is your contest code?")
-        self.assert_answer(contest, 'OK. Now please state your name!')
+        self.assert_answer(contest, "OK. Now please state your name!")
         self.make_call(user)
         self.callback.assert_called()
         self.callback.reset_mock()
@@ -106,7 +114,7 @@ class Abstract(unittest.TestCase):
     def add_bets(self, contest, player, bets):
         """add bets for a player"""
         self.assert_answer("Hello", "What is your contest code?")
-        self.assert_answer(contest, 'OK. Now please state your name!')
+        self.assert_answer(contest, "OK. Now please state your name!")
         self.make_call(player)
         for bet in bets:
             self.make_call(f"{bet[0]}:{bet[1]}")
@@ -116,8 +124,10 @@ class Abstract(unittest.TestCase):
     def create_contest(self, contest):
         """creates new contest"""
         self.assert_answer("Hello", "What is your contest code?")
-        self.assert_answer("create contest", 'Please state the name of the contest')
-        self.assert_answer(contest, 'OK. New contest created', 'Now please state your name!')
+        self.assert_answer("create contest", "Please state the name of the contest")
+        self.assert_answer(
+            contest, "OK. New contest created", "Now please state your name!"
+        )
         self.build_new_pack()
 
     def assert_answer(self, ask, *respond, reset=True):
@@ -142,11 +152,7 @@ class Abstract(unittest.TestCase):
             msg = f"Nice to meet you {name}"
         else:
             msg = f"Welcome back {name}"
-        self.assert_answer(
-            name,
-            msg,
-            unittest.mock.ANY
-        )
+        self.assert_answer(name, msg, unittest.mock.ANY)
 
     def build_new_pack(self):
         """builds new package for exchange between chatbot"""
@@ -157,11 +163,11 @@ class Abstract(unittest.TestCase):
         self.callback.reset_mock()
         self.build_new_pack()
         self.assert_answer("Hello", "What is your contest code?")
-        self.assert_answer(contest, 'OK. Now please state your name!')
+        self.assert_answer(contest, "OK. Now please state your name!")
         self.assert_answer(player, f"Welcome back {player}")
-        nothing = call('Nothing to cancel. Enter first bet')
-        canceling = call('OK. Canceled previous bet')
-        no_contest = call('Such contest does not exist. Try again')
+        nothing = call("Nothing to cancel. Enter first bet")
+        canceling = call("OK. Canceled previous bet")
+        no_contest = call("Such contest does not exist. Try again")
         timeout = 3 + time.time()
         while True:
             self.make_call("cancel")
@@ -192,7 +198,7 @@ class AdminMode(Abstract):
         self.make_call("Hello")
         self.make_call("Burgy")
         self.assert_answer("admin mode", "Please identify yourself")
-        self.assert_answer("yunkr", 'You are not identified. Please identify')
+        self.assert_answer("yunkr", "You are not identified. Please identify")
         self.assert_answer("yunk", "You are identified. Commands available")
 
     def test_add_player(self):
@@ -210,11 +216,13 @@ class Results(Abstract):
     def setUp(self):
         AdminMode.setUp(self)
         self.contest_name = "Yogers"
-        self.add_bets(self.contest_name, self.administrator, [(1,1), (2,1), (3,5), (1,2)])
+        self.add_bets(
+            self.contest_name, self.administrator, [(1, 1), (2, 1), (3, 5), (1, 2)]
+        )
         self.users = [
-            ["Yanek", [(1,1), (2,0), (3,6), (1,0)]],
-            ["Ulbek", [(0,0), (3,0), (2,4), (0,1)]],
-            ["Iko", [(1,3), (0,1), (1,0), (2,3)]],
+            ["Yanek", [(1, 1), (2, 0), (3, 6), (1, 0)]],
+            ["Ulbek", [(0, 0), (3, 0), (2, 4), (0, 1)]],
+            ["Iko", [(1, 3), (0, 1), (1, 0), (2, 3)]],
         ]
         for user in self.users:
             self.add_players(self.contest_name, user[0])
@@ -241,7 +249,7 @@ class NextGame(Abstract):
         self.make_call("greet")
         self.callback.reset_mock()
         self.make_call("Burgy")
-        no_contest = call('Such contest does not exist. Try again')
+        no_contest = call("Such contest does not exist. Try again")
         if self.callback.call_args_list[0] == no_contest:
             self.make_call("create contest")
             self.assert_answer("Burgy", "Now please state your name!")
@@ -265,6 +273,7 @@ class NextGame(Abstract):
 
 class Play(Abstract):
     """Testcase on starting to play FIFA Betting Game"""
+
     player = "Richard"
     contest_name = "family"
 
@@ -275,7 +284,9 @@ class Play(Abstract):
     def test(self):
         """should be possible to call start of the game"""
         self.assert_answer("Hello", "What is your contest code?")
-        self.assert_answer("help", "If you want to create new contest call create contest")
+        self.assert_answer(
+            "help", "If you want to create new contest call create contest"
+        )
         self.assert_answer("create contest", "Please state the name of the contest")
         self.assert_answer(self.contest_name, "Now please state your name!")
         self.assert_answer(
@@ -298,7 +309,9 @@ class Play(Abstract):
         self.assert_answer("0:2", "What will be result between England and Iran?")
         self.build_new_pack()
         self.register()
-        self.assert_answer("0:2", "What will be result between Senegal and Netherlands?")
+        self.assert_answer(
+            "0:2", "What will be result between Senegal and Netherlands?"
+        )
 
 
 class Predictions(Abstract):
@@ -310,9 +323,9 @@ class Predictions(Abstract):
         self.player2 = str(time.time())
         self.contest = str(time.time())
         self.create_contest(self.contest)
-        results = [(0,0)] * 32
-        self.add_bets(self.contest, self.player1, results + [(1,1), (2,2)])
-        self.add_bets(self.contest, self.player2, results + [(3,3), (4,4)])
+        results = [(0, 0)] * 32
+        self.add_bets(self.contest, self.player1, results + [(1, 1), (2, 2)])
+        self.add_bets(self.contest, self.player2, results + [(3, 3), (4, 4)])
         self.assertTrue(self.is_valid_contest("admin"))
 
     def tearDown(self):
@@ -320,10 +333,10 @@ class Predictions(Abstract):
 
     def test(self):
         """able to get two results for games from 33-48"""
-        self.add_bets("admin", self.administrator, [(0,0)] * 31)
+        self.add_bets("admin", self.administrator, [(0, 0)] * 31)
         msg = f"Portugal and Uruguay {self.player1} 0:0 {self.player2} 0:0"
         self.assert_prediction(msg)
-        self.add_bets("admin", self.administrator, [(0,0)])
+        self.add_bets("admin", self.administrator, [(0, 0)])
         msg = f"Netherlands and Qatar {self.player1} 1:1 {self.player2} 3:3"
         msg += f" Ecuador and Senegal {self.player1} 2:2 {self.player2} 4:4"
         self.assert_prediction(msg)
@@ -396,26 +409,26 @@ class Full(Abstract):
             ("0:2", "Serbia and Switzerland"),
             ("0:2", "Cameroon and Brazil"),
             ("0:2", "GROUP"),
-            ("0:2", "LOAD_GROUP_STAGE"), # Round 16 49
-            ("0:2", "Argentina and Denmark"), # 50
-            ("cancel", "Qatar and Iran"), # Try cancelling in middle of group16
-            ("0:2", "Argentina and Denmark"), # 50
-            ("0:2", "France and Saudi Arabia"), # 51
-            ("0:2", "England and Ecuador"), # 52
-            ("0:2", "Spain and Canada"), # 53
-            ("1:1", "DRAW"), # Disallow draws
-            ("0:2", "Brazil and Ghana"), # 54
-            ("0:2", "Belgium and Germany"), # 55
-            ("0:2", "Portugal and Serbia"), # 56
-            ("0:2", "LOAD_GROUP_16"), # Round 16 49
-            ("1:2", "Spain and Brazil"), # Quarter-finals 57
-            ("0:2", "Qatar and Argentina"), # 58
-            ("0:2", "Belgium and Portugal"), # 59
-            ("0:2", "France and England"), # 60
-            ("0:2", "LOAD_QFINALS"), # Round 16 49
-            ("0:2", "Spain and Qatar"), # Semi-finals
+            ("0:2", "LOAD_GROUP_STAGE"),  # Round 16 49
+            ("0:2", "Argentina and Denmark"),  # 50
+            ("cancel", "Qatar and Iran"),  # Try cancelling in middle of group16
+            ("0:2", "Argentina and Denmark"),  # 50
+            ("0:2", "France and Saudi Arabia"),  # 51
+            ("0:2", "England and Ecuador"),  # 52
+            ("0:2", "Spain and Canada"),  # 53
+            ("1:1", "DRAW"),  # Disallow draws
+            ("0:2", "Brazil and Ghana"),  # 54
+            ("0:2", "Belgium and Germany"),  # 55
+            ("0:2", "Portugal and Serbia"),  # 56
+            ("0:2", "LOAD_GROUP_16"),  # Round 16 49
+            ("1:2", "Spain and Brazil"),  # Quarter-finals 57
+            ("0:2", "Qatar and Argentina"),  # 58
+            ("0:2", "Belgium and Portugal"),  # 59
+            ("0:2", "France and England"),  # 60
+            ("0:2", "LOAD_QFINALS"),  # Round 16 49
+            ("0:2", "Spain and Qatar"),  # Semi-finals
             ("0:2", "Belgium and France"),
-            ("0:2", "LOAD_SEMIFINALS"), # Round 16 49
+            ("0:2", "LOAD_SEMIFINALS"),  # Round 16 49
             ("0:2", "Qatar and France"),
             ("0:2", "Spain and Belgium"),
             ("2:0", "CHAMP"),
@@ -459,54 +472,54 @@ class Full(Abstract):
         """upload results for group 16 matches"""
         self.assertTrue(self.is_valid_contest("admin"))
         results_16 = [
-            (2,0),
-            (2,2),
-            (0,2),
-            (0,2),
-            (2,2),
-            (2,0),
-            (0,2),
-            (2,0),
-            (0,2),
-            (0,2),
-            (2,0),
-            (2,0),
-            (0,2),
-            (0,2),
-            (0,2),
-            (2,1),
-            (0,2),
-            (2,0),
-            (0,2),
-            (5,0),
-            (0,2),
-            (0,2),
-            (2,2),
-            (5,0),
-            (0,2),
-            (0,2),
-            (0,2),
-            (1,1),
-            (0,2),
-            (1,1),
-            (2,0),
-            (2,0),
-            (0,2),
-            (5,0),
-            (0,2),
-            (2,0),
-            (0,1),
-            (0,2),
-            (0,2),
-            (2,0),
-            (0,2),
-            (2,0),
-            (0,2),
-            (0,2),
-            (1,2),
-            (0,2),
-            (0,2),
-            (0,2),
+            (2, 0),
+            (2, 2),
+            (0, 2),
+            (0, 2),
+            (2, 2),
+            (2, 0),
+            (0, 2),
+            (2, 0),
+            (0, 2),
+            (0, 2),
+            (2, 0),
+            (2, 0),
+            (0, 2),
+            (0, 2),
+            (0, 2),
+            (2, 1),
+            (0, 2),
+            (2, 0),
+            (0, 2),
+            (5, 0),
+            (0, 2),
+            (0, 2),
+            (2, 2),
+            (5, 0),
+            (0, 2),
+            (0, 2),
+            (0, 2),
+            (1, 1),
+            (0, 2),
+            (1, 1),
+            (2, 0),
+            (2, 0),
+            (0, 2),
+            (5, 0),
+            (0, 2),
+            (2, 0),
+            (0, 1),
+            (0, 2),
+            (0, 2),
+            (2, 0),
+            (0, 2),
+            (2, 0),
+            (0, 2),
+            (0, 2),
+            (1, 2),
+            (0, 2),
+            (0, 2),
+            (0, 2),
         ]
         self.add_bets("admin", self.administrator, results_16)
         self.build_new_pack()
@@ -514,14 +527,14 @@ class Full(Abstract):
     def load_group_16(self):
         """load group 16 results"""
         scores = [
-            (2,0),
-            (2,0),
-            (2,0),
-            (2,0),
-            (2,0),
-            (2,0),
-            (2,0),
-            (2,0),
+            (2, 0),
+            (2, 0),
+            (2, 0),
+            (2, 0),
+            (2, 0),
+            (2, 0),
+            (2, 0),
+            (2, 0),
         ]
         self.add_bets("admin", self.administrator, scores)
         self.build_new_pack()
@@ -529,10 +542,10 @@ class Full(Abstract):
     def load_qfinals(self):
         """load quarter finalists"""
         scores = [
-            (2,0),
-            (2,0),
-            (2,0),
-            (2,0),
+            (2, 0),
+            (2, 0),
+            (2, 0),
+            (2, 0),
         ]
         self.add_bets("admin", self.administrator, scores)
         self.build_new_pack()
@@ -540,8 +553,8 @@ class Full(Abstract):
     def load_semis(self):
         """load quarter finalists"""
         scores = [
-            (2,0),
-            (2,0),
+            (2, 0),
+            (2, 0),
         ]
         self.add_bets("admin", self.administrator, scores)
         self.build_new_pack()

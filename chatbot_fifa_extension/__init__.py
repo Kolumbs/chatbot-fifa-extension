@@ -1,4 +1,5 @@
 """Package allows to extend a chatbot with FIFA World Cup results prediction game"""
+
 from zoozl.chatbot import Interface, Message
 
 import membank
@@ -26,16 +27,19 @@ def is_valid_result(result, callback):
 
 class FIFAGame(Interface):
     """Allows to make predictions for World Cup results"""
+
     aliases = {"play fifa", "play world cup"}
 
-    def __init__(self, conf):
-        Interface.__init__(self, conf)
-        if "database_path" not in conf or "administrator" not in conf:
+    def load(self, root):
+        """Load database."""
+        my_conf = root.conf["chatbot_fifa_extension"]
+        if "database_path" not in my_conf or "administrator" not in my_conf:
             msg = "FIFAGame requires a database path and administrator in config"
             raise RuntimeError(msg)
-        url = f'sqlite://{conf["database_path"]}/db'
+        url = f'sqlite://{my_conf["database_path"]}/db'
         self.mem = membank.LoadMemory(url)
         self._is_complete = False
+        self.conf = my_conf
 
     def consume(self, package):
         if package.message.text == "admin mode":
@@ -69,7 +73,9 @@ class FIFAGame(Interface):
                 package.callback("OK. Now please state your name!")
             else:
                 package.callback("Such contest does not exist. Try again")
-                package.callback("If you want to create new contest call create contest")
+                package.callback(
+                    "If you want to create new contest call create contest"
+                )
 
     def create_contest(self, package):
         """creates new contest"""
@@ -128,7 +134,9 @@ class FIFAGame(Interface):
                     package.callback("Please wait while semi finals end")
                 else:
                     champ = fifa.get_knock_win(bet.player.bets[-1])
-                    package.callback(f"Congrats {champ} is your World Cup 2022 Champion!")
+                    package.callback(
+                        f"Congrats {champ} is your World Cup 2022 Champion!"
+                    )
                     package.callback("Your bets are finalised! Good luck!!!")
                     self._is_complete = True
         else:
@@ -223,7 +231,9 @@ class FIFAGame(Interface):
                 index = fifa.bets_complete(admin.bets)
                 text = self._get_predictions(contest.players, admin.bets, index)
                 if 31 < index < 48:
-                    text += self._get_predictions(contest.players, admin.bets, index+1)
+                    text += self._get_predictions(
+                        contest.players, admin.bets, index + 1
+                    )
                 package.callback(text.strip())
 
     def _get_predictions(self, players, bet_results, index):
@@ -264,7 +274,7 @@ class FIFAGame(Interface):
                 results = fifa.get_player_results(players, admin.bets, index)
                 results = sorted(
                     [key + " " + str(value) for key, value in results.items()],
-                    key = lambda x: int(x.split(" ", maxsplit=2)[1]),
-                    reverse = True,
+                    key=lambda x: int(x.split(" ", maxsplit=2)[1]),
+                    reverse=True,
                 )
                 package.callback(" ".join(results))
