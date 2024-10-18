@@ -1,3 +1,4 @@
 pylint
 build
 membank>=0.4.1
+flake8

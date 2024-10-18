@@ -1,6 +1,6 @@
 """Package allows to extend a chatbot with FIFA World Cup results prediction game"""
 
-from zoozl.chatbot import Interface, Message
+from zoozl.chatbot import Interface
 
 import membank
 
@@ -41,8 +41,8 @@ class FIFAGame(Interface):
         self._is_complete = False
         self.conf = my_conf
 
-    def consume(self, package):
-        if package.message.text == "admin mode":
+    def consume(self, context, package):
+        if package.last_message.text == "admin mode":
             package.conversation.data["admin mode"] = {}
             package.callback("Please identify yourself")
         elif "admin mode" in package.conversation.data:
@@ -51,7 +51,7 @@ class FIFAGame(Interface):
             package.callback("What is your contest code?")
             package.conversation.data["contest"] = None
         elif not package.conversation.data["contest"]:
-            if "create contest" in package.message.text:
+            if "create contest" in package.last_message.text:
                 package.conversation.data["create contest"] = True
                 package.callback("Please state the name of the contest")
             else:
@@ -67,7 +67,7 @@ class FIFAGame(Interface):
         if "create contest" in package.conversation.data:
             self.create_contest(package)
         else:
-            contest = self.mem.get.contest(code=package.message.text)
+            contest = self.mem.get.contest(code=package.last_message.text)
             if contest:
                 package.conversation.data["contest"] = contest
                 package.callback("OK. Now please state your name!")
@@ -79,10 +79,10 @@ class FIFAGame(Interface):
 
     def create_contest(self, package):
         """creates new contest"""
-        code = package.message.text
+        code = package.last_message.text
         contest = self.mem.get.contest(code=code)
         if not contest:
-            contest = memories.Contest(package.message.text)
+            contest = memories.Contest(package.last_message.text)
             self.mem.put(contest)
             package.callback("OK. New contest created")
         else:
@@ -92,9 +92,9 @@ class FIFAGame(Interface):
 
     def add_player(self, package):
         """creates or restores to existing player"""
-        player = self.mem.get.player(name=package.message.text)
+        player = self.mem.get.player(name=package.last_message.text)
         if not player:
-            player = memories.Player(name=package.message.text)
+            player = memories.Player(name=package.last_message.text)
             self.mem.put(player)
             package.conversation.data["contest"].players.append(player.name)
             self.mem.put(package.conversation.data["contest"])
@@ -140,10 +140,10 @@ class FIFAGame(Interface):
                     package.callback("Your bets are finalised! Good luck!!!")
                     self._is_complete = True
         else:
-            if "cancel" in package.message.text:
+            if "cancel" in package.last_message.text:
                 self.cancel_bet(bet, package)
             else:
-                result = package.message.text.split(":", maxsplit=2)
+                result = package.last_message.text.split(":", maxsplit=2)
                 if is_valid_result(result, package.callback):
                     try:
                         bet.add_bet(result)
@@ -167,18 +167,18 @@ class FIFAGame(Interface):
         """admin mode handling"""
         admin_conf = package.conversation.data["admin mode"]
         if not admin_conf:
-            if package.message.text == self.conf["administrator"]:
+            if package.last_message.text == self.conf["administrator"]:
                 package.callback("You are identified. Commands available")
                 admin_conf["command"] = ""
                 admin_conf["data"] = {}
             else:
                 package.callback("You are not identified. Please identify")
         else:
-            if package.message.text == "add players to contest":
+            if package.last_message.text == "add players to contest":
                 admin_conf["command"] = "add_player_to_contest"
-            if package.message.text == "predictions":
+            if package.last_message.text == "predictions":
                 admin_conf["command"] = "predictions"
-            if package.message.text == "results":
+            if package.last_message.text == "results":
                 admin_conf["command"] = "results"
             if "command" in admin_conf and admin_conf["command"]:
                 executor = getattr(self, admin_conf["command"])
@@ -189,25 +189,25 @@ class FIFAGame(Interface):
     def add_player_to_contest(self, package):
         """add player name to contest"""
         data = package.conversation.data["admin mode"]["data"]
-        if "done" == package.message.text:
+        if "done" == package.last_message.text:
             package.callback("OK.")
             package.conversation.data["admin mode"] = {}
         elif "contest" not in data:
             package.callback("State name of contest")
             data["contest"] = ""
         elif not data["contest"]:
-            data["contest"] = package.message.text
-            contest = self.mem.get.contest(code=package.message.text)
+            data["contest"] = package.last_message.text
+            contest = self.mem.get.contest(code=package.last_message.text)
             if not contest:
-                package.callback(f"Contest {package.message.text} not found")
+                package.callback(f"Contest {package.last_message.text} not found")
             else:
                 data["contest"] = contest
                 package.callback("Contest is {data['contest'].code}")
                 package.callback("State name of the player to add")
         else:
-            player = self.mem.get.player(name=package.message.text)
+            player = self.mem.get.player(name=package.last_message.text)
             if not player:
-                package.callback("Player {package.message.text} does not exist")
+                package.callback("Player {package.last_message.text} does not exist")
             else:
                 name = player.name
                 if name not in data["contest"].players:
@@ -222,10 +222,10 @@ class FIFAGame(Interface):
             package.callback("For which contest?")
             data["contest"] = ""
         elif not data["contest"]:
-            contest = package.message.text
+            contest = package.last_message.text
             contest = self.mem.get.contest(code=contest)
             if not contest:
-                package.callback(f"Contest {package.message.text} not found")
+                package.callback(f"Contest {package.last_message.text} not found")
             else:
                 admin = self.mem.get.player(name=self.conf["administrator"])
                 index = fifa.bets_complete(admin.bets)
@@ -259,10 +259,10 @@ class FIFAGame(Interface):
             package.callback("For which contest?")
             data["contest"] = ""
         elif not data["contest"]:
-            contest = package.message.text
+            contest = package.last_message.text
             contest = self.mem.get.contest(code=contest)
             if not contest:
-                package.callback(f"Contest {package.message.text} not found")
+                package.callback(f"Contest {package.last_message.text} not found")
             else:
                 admin = self.mem.get.player(name=self.conf["administrator"])
                 index = fifa.bets_complete(admin.bets)

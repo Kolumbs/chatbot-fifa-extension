@@ -4,7 +4,7 @@ import time
 import unittest
 from unittest.mock import MagicMock, call
 
-from zoozl.chatbot import Package, Conversation, Message
+from zoozl.chatbot import Package, Conversation, Message, InterfaceRoot
 
 from chatbot_fifa_extension import FIFAGame, fifa
 
@@ -85,8 +85,10 @@ class Abstract(unittest.TestCase):
                 "administrator": self.administrator,
             }
         }
-        self.game = FIFAGame(conf=conf)
-        self.game.load(self.game)
+        self.root = InterfaceRoot(conf)
+        self.root.load()
+        self.game = FIFAGame()
+        self.game.load(self.root)
         self.callback = MagicMock()
         self.build_new_pack()
 
@@ -139,8 +141,8 @@ class Abstract(unittest.TestCase):
 
     def make_call(self, ask):
         """makes a call"""
-        self.pack.message.text = ask
-        self.game.consume(self.pack)
+        self.pack.conversation.messages.append(Message(ask))
+        self.game.consume(self.root, self.pack)
 
     def register(self, name="Richard", contest="family", new=False):
         """helper function to register player in contest"""
@@ -156,7 +158,7 @@ class Abstract(unittest.TestCase):
 
     def build_new_pack(self):
         """builds new package for exchange between chatbot"""
-        self.pack = Package(Message(""), Conversation(), self.callback)
+        self.pack = Package(Conversation(), self.callback)
 
     def cancel_all_bets(self, player, contest):
         """cleans out all previous bets"""
