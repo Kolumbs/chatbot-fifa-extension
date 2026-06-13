@@ -123,6 +123,14 @@ def _next_unbet(player):
 # --------------------------------------------------------------------------- #
 # Administrative handlers (gated by admin_secret)
 # --------------------------------------------------------------------------- #
+def authenticate_admin(ctx: FifaContext, args: AdminAuth) -> str:
+    """Check whether the provided admin secret is correct."""
+    err = _require_admin(ctx, args.admin_secret)
+    if err:
+        return err
+    return "Verified: the admin secret is correct - you may set up the tournament."
+
+
 def register_group(ctx: FifaContext, args: RegisterGroup) -> str:
     """Register or overwrite a group and its teams."""
     err = _require_admin(ctx, args.admin_secret)
@@ -257,6 +265,14 @@ def cancel_last_bet(ctx: FifaContext, args: PlayerRef) -> str:
 # --------------------------------------------------------------------------- #
 TOOLSPECS: list[ToolSpec] = [
     # administrative
+    ToolSpec(
+        "authenticate_admin",
+        "Check whether an admin secret is correct. Call this whenever someone "
+        "offers the admin secret, and let the result decide - do not judge the "
+        "secret yourself.",
+        AdminAuth,
+        authenticate_admin,
+    ),
     ToolSpec(
         "register_group",
         "ADMIN: register or overwrite a group and the teams in it "
