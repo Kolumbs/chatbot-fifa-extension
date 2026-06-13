@@ -108,6 +108,16 @@ class PlaceBet(pydantic.BaseModel):
     )
 
 
+class UpdatePrediction(pydantic.BaseModel):
+    """Correct a player's prediction for a specific (not-yet-started) match."""
+
+    player_name: str = pydantic.Field(description="Name of the player.")
+    home: str = pydantic.Field(description="Home team of the match to fix.")
+    away: str = pydantic.Field(description="Away team of the match to fix.")
+    home_score: int = pydantic.Field(ge=0, description="Corrected home goals.")
+    away_score: int = pydantic.Field(ge=0, description="Corrected away goals.")
+
+
 # --------------------------------------------------------------------------- #
 # Tool descriptor
 # --------------------------------------------------------------------------- #
@@ -433,21 +443,25 @@ def place_bet(ctx: FifaContext, args: PlaceBet) -> str:
     )
 
 
-def cancel_last_bet(ctx: FifaContext, args: PlayerRef) -> str:
-    """Cancel the player's latest still-open prediction so it can be re-entered."""
+def update_prediction(ctx: FifaContext, args: UpdatePrediction) -> str:
+    """Correct a player's prediction for a specific match that hasn't started."""
     player = ctx.store.get.player(name=args.player_name)
     if not player:
         return f"No player named '{args.player_name}'. Register first."
-    preds = _ensure_predictions(player)
-    for match in reversed(_ordered_matches(ctx)):
-        if str(match.number) in preds and not _has_started(match):
-            del preds[str(match.number)]
-            ctx.store.put(player)
-            return (
-                f"Canceled {args.player_name}'s prediction for {_label(match)}. "
-                "You can predict it again."
-            )
-    return f"{args.player_name} has no open predictions to cancel."
+    match = _find_match(ctx, args.home, args.away)
+    if not match:
+        return f"No match '{args.home} vs {args.away}' in the schedule."
+    if _has_started(match):
+        return (
+            f"{_label(match)} has already kicked off, so its prediction is "
+            "locked. Only Juris can change it now."
+        )
+    _ensure_predictions(player)[str(match.number)] = [args.home_score, args.away_score]
+    ctx.store.put(player)
+    return (
+        f"Updated {args.player_name}'s prediction for {_label(match)} to "
+        f"{args.home_score}:{args.away_score}."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -549,10 +563,11 @@ TOOLSPECS: list[ToolSpec] = [
         place_bet,
     ),
     ToolSpec(
-        "cancel_last_bet",
-        "Cancel a player's latest still-open prediction so it can be entered again.",
-        PlayerRef,
-        cancel_last_bet,
+        "update_prediction",
+        "Correct a player's prediction for a specific match (by team names) that "
+        "has not kicked off yet.",
+        UpdatePrediction,
+        update_prediction,
     ),
 ]
 
