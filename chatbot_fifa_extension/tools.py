@@ -1,13 +1,16 @@
 """Framework-neutral FIFA World Cup betting capability.
 
-The betting operations are exposed as a list of :class:`ToolSpec` descriptors.
-Each descriptor carries a name, a human/LLM-readable description, a pydantic
-model describing its parameters (the single source of truth for the schema),
-and a plain handler ``(FifaContext, params) -> str``.
+The operations are exposed as a list of :class:`ToolSpec` descriptors. Each
+descriptor carries a name, a human/LLM-readable description, a pydantic model
+describing its parameters (the single source of truth for the schema), and a
+plain handler ``(FifaContext, params) -> str``.
 
-No LLM/agent SDK is imported here. A front-end (the OpenAI Agents SDK adapter
-in the host, or a future MCP/REST binding) iterates :data:`TOOLSPECS` and binds
-each descriptor to its own tool format.
+The tournament is data-driven: an administrator registers the groups and their
+teams, and the group-stage fixtures are derived from them. No tournament data
+is hard-coded, and no LLM/agent SDK is imported here.
+
+Administrative tools are gated by ``admin_secret`` (validated inside the
+handler, so the gate does not rely on the calling LLM).
 """
 
 from dataclasses import dataclass
@@ -17,12 +20,32 @@ import pydantic
 
 from . import fifa, memories
 from .context import FifaContext
-from .exceptions import DrawNotAllowed
 
 
 # --------------------------------------------------------------------------- #
 # Parameter schemas (pydantic = schema source of truth + validation)
 # --------------------------------------------------------------------------- #
+class NoArgs(pydantic.BaseModel):
+    """No parameters."""
+
+
+class AdminAuth(pydantic.BaseModel):
+    """Base for administrative operations requiring the admin secret."""
+
+    admin_secret: str = pydantic.Field(
+        description="The admin secret that authorizes tournament management."
+    )
+
+
+class RegisterGroup(AdminAuth):
+    """Register (or overwrite) a group and the teams competing in it."""
+
+    group: str = pydantic.Field(description="Group label, for example 'A'.")
+    teams: list[str] = pydantic.Field(
+        description="The teams competing in this group."
+    )
+
+
 class ContestRef(pydantic.BaseModel):
     """Reference to a contest by its code."""
 
@@ -48,7 +71,7 @@ class PlaceBet(pydantic.BaseModel):
     """Predicted score for the match currently awaiting the player's bet."""
 
     player_name: str = pydantic.Field(
-        description="Name of the player placing the bet."
+        description="Name of the player placing the prediction."
     )
     home_score: int = pydantic.Field(
         ge=0, description="Predicted goals for the first team in the match."
@@ -63,7 +86,7 @@ class PlaceBet(pydantic.BaseModel):
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class ToolSpec:
-    """A framework-neutral description of one betting operation."""
+    """A framework-neutral description of one operation."""
 
     name: str
     description: str
@@ -74,18 +97,64 @@ class ToolSpec:
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
-def _admin_bets(ctx: FifaContext):
-    """Return the administrator's bets (actual results), or an empty list.
+def _require_admin(ctx: FifaContext, token: str):
+    """Return an error string if the admin secret is missing/wrong, else None."""
+    if not ctx.admin_secret:
+        return "Admin features are not configured on this bot."
+    if token != ctx.admin_secret:
+        return "Not authorized: the admin secret is incorrect."
+    return None
 
-    The administrator's bets drive knockout-stage progression and scoring. They
-    are not required for group-stage betting, which is pre-seeded per player.
-    """
-    admin = ctx.store.get.player(name=ctx.administrator)
-    return admin.bets if admin else []
+
+def _group_fixtures(ctx: FifaContext):
+    """Return the ordered group-stage fixtures derived from registered groups."""
+    groups = list(ctx.store.get("group"))
+    return fifa.generate_group_fixtures(groups)
+
+
+def _next_unbet(player):
+    """Return the next match the player has not predicted yet, or ''. """
+    for game, result in player.bets:
+        if not result:
+            return game
+    return ""
 
 
 # --------------------------------------------------------------------------- #
-# Handlers
+# Administrative handlers (gated by admin_secret)
+# --------------------------------------------------------------------------- #
+def register_group(ctx: FifaContext, args: RegisterGroup) -> str:
+    """Register or overwrite a group and its teams."""
+    err = _require_admin(ctx, args.admin_secret)
+    if err:
+        return err
+    name = args.group.strip().upper()
+    teams = [t.strip() for t in args.teams if t.strip()]
+    ctx.store.put(memories.Group(name=name, teams=teams))
+    return f"Registered group {name}: {', '.join(teams)}."
+
+
+def list_groups(ctx: FifaContext, _args: NoArgs) -> str:
+    """List the registered groups and their teams."""
+    groups = sorted(ctx.store.get("group"), key=lambda g: g.name)
+    if not groups:
+        return "No groups are registered yet."
+    return "\n".join(f"Group {g.name}: {', '.join(g.teams)}" for g in groups)
+
+
+def clear_tournament(ctx: FifaContext, args: AdminAuth) -> str:
+    """Delete all registered groups (use to redo the tournament setup)."""
+    err = _require_admin(ctx, args.admin_secret)
+    if err:
+        return err
+    groups = list(ctx.store.get("group"))
+    for group in groups:
+        ctx.store.delete(group)
+    return f"Cleared {len(groups)} group(s)."
+
+
+# --------------------------------------------------------------------------- #
+# Player handlers
 # --------------------------------------------------------------------------- #
 def find_or_create_contest(ctx: FifaContext, args: ContestRef) -> str:
     """Find a contest by code, creating it if it does not exist."""
@@ -105,93 +174,110 @@ def register_player(ctx: FifaContext, args: RegisterPlayer) -> str:
             f"Contest '{args.contest_code}' does not exist. "
             "Create it first with find_or_create_contest."
         )
+    fixtures = _group_fixtures(ctx)
+    if not fixtures:
+        return (
+            "The tournament isn't set up yet - no groups have been registered. "
+            "An admin needs to register the groups and teams first."
+        )
     player = ctx.store.get.player(name=args.name)
     created = False
     if not player:
         player = memories.Player(name=args.name)
-        ctx.store.put(player)
         created = True
+    if not player.bets:
+        player.bets = [[fixture, 0] for fixture in fixtures]
+    ctx.store.put(player)
     if args.name not in contest.players:
         contest.players.append(args.name)
         ctx.store.put(contest)
-    cup = fifa.WorldCup(player, _admin_bets(ctx))
-    cup.load_next_bet()
-    ctx.store.put(player)
     verb = "Registered" if created else "Welcome back,"
-    if player.next_bet:
+    nxt = _next_unbet(player)
+    if nxt:
         return (
             f"{verb} {args.name} in contest '{args.contest_code}'. "
-            f"Next match to bet on: {player.next_bet}."
+            f"Next match to predict: {nxt}."
         )
     return (
         f"{verb} {args.name} in contest '{args.contest_code}'. "
-        "No match is awaiting a bet right now."
+        "You have predicted every match."
     )
 
 
 def get_next_match(ctx: FifaContext, args: PlayerRef) -> str:
-    """Return the next match awaiting the player's bet, if any."""
+    """Return the next match awaiting the player's prediction, if any."""
     player = ctx.store.get.player(name=args.player_name)
     if not player:
         return f"No player named '{args.player_name}'. Register first."
-    cup = fifa.WorldCup(player, _admin_bets(ctx))
-    cup.load_next_bet()
-    ctx.store.put(player)
-    if player.next_bet:
-        return f"Next match awaiting {args.player_name}'s bet: {player.next_bet}."
-    return f"{args.player_name} has no match awaiting a bet right now."
+    nxt = _next_unbet(player)
+    if nxt:
+        return f"Next match awaiting {args.player_name}'s prediction: {nxt}."
+    return f"{args.player_name} has predicted every match."
 
 
 def place_bet(ctx: FifaContext, args: PlaceBet) -> str:
-    """Record the player's predicted score for the match awaiting a bet."""
+    """Record the player's predicted score for the match awaiting a prediction."""
     player = ctx.store.get.player(name=args.player_name)
     if not player:
         return f"No player named '{args.player_name}'. Register first."
-    cup = fifa.WorldCup(player, _admin_bets(ctx))
-    cup.load_next_bet()
-    match = player.next_bet
+    match = ""
+    for bet in player.bets:
+        if not bet[1]:
+            match = bet[0]
+            bet[1] = [args.home_score, args.away_score]
+            break
     if not match:
-        return f"{args.player_name} has no match awaiting a bet right now."
-    try:
-        cup.add_bet([args.home_score, args.away_score])
-    except DrawNotAllowed:
-        return (
-            f"Draws are not allowed in the knockout stage for match {match}. "
-            "Please give a decisive score."
-        )
-    cup.load_next_bet()
+        return f"{args.player_name} has no match awaiting a prediction."
     ctx.store.put(player)
-    if player.next_bet:
-        nxt = f" Next match: {player.next_bet}."
-    else:
-        nxt = " That was the last match awaiting a bet."
+    nxt = _next_unbet(player)
+    tail = f" Next match: {nxt}." if nxt else " That was the last match."
     return (
-        f"Recorded {args.player_name}'s bet on {match}: "
-        f"{args.home_score}:{args.away_score}.{nxt}"
+        f"Recorded {args.player_name}'s prediction for {match}: "
+        f"{args.home_score}:{args.away_score}.{tail}"
     )
 
 
 def cancel_last_bet(ctx: FifaContext, args: PlayerRef) -> str:
-    """Cancel the player's most recent bet so it can be re-entered."""
+    """Cancel the player's most recent prediction so it can be re-entered."""
     player = ctx.store.get.player(name=args.player_name)
     if not player:
         return f"No player named '{args.player_name}'. Register first."
-    cup = fifa.WorldCup(player, _admin_bets(ctx))
-    canceled = cup.cancel_previous_bet()
-    cup.load_next_bet()
+    canceled = fifa.remove_previous_bet(player.bets)
     ctx.store.put(player)
     if canceled:
         return (
-            f"Canceled {args.player_name}'s last bet on {canceled}. "
-            f"Next match: {player.next_bet or 'none'}."
+            f"Canceled {args.player_name}'s prediction for {canceled}. "
+            "You can predict it again."
         )
-    return f"{args.player_name} has no bets to cancel."
+    return f"{args.player_name} has no predictions to cancel."
 
 
 # --------------------------------------------------------------------------- #
 # Registry
 # --------------------------------------------------------------------------- #
 TOOLSPECS: list[ToolSpec] = [
+    # administrative
+    ToolSpec(
+        "register_group",
+        "ADMIN: register or overwrite a group and the teams in it "
+        "(requires the admin secret).",
+        RegisterGroup,
+        register_group,
+    ),
+    ToolSpec(
+        "list_groups",
+        "List the registered tournament groups and their teams.",
+        NoArgs,
+        list_groups,
+    ),
+    ToolSpec(
+        "clear_tournament",
+        "ADMIN: delete all registered groups to redo setup "
+        "(requires the admin secret).",
+        AdminAuth,
+        clear_tournament,
+    ),
+    # player
     ToolSpec(
         "find_or_create_contest",
         "Find a betting contest by its code, creating it if it does not exist.",
@@ -200,25 +286,25 @@ TOOLSPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "register_player",
-        "Register a player (by name) in a contest so they can place bets.",
+        "Register a player (by name) in a contest so they can place predictions.",
         RegisterPlayer,
         register_player,
     ),
     ToolSpec(
         "get_next_match",
-        "Get the next match that is awaiting a bet from the given player.",
+        "Get the next match that is awaiting a prediction from the given player.",
         PlayerRef,
         get_next_match,
     ),
     ToolSpec(
         "place_bet",
-        "Record a player's predicted score for the match awaiting their bet.",
+        "Record a player's predicted score for the match awaiting their prediction.",
         PlaceBet,
         place_bet,
     ),
     ToolSpec(
         "cancel_last_bet",
-        "Cancel a player's most recent bet so it can be entered again.",
+        "Cancel a player's most recent prediction so it can be entered again.",
         PlayerRef,
         cancel_last_bet,
     ),
@@ -226,5 +312,5 @@ TOOLSPECS: list[ToolSpec] = [
 
 
 def get_toolspecs() -> list[ToolSpec]:
-    """Return the list of available betting tool descriptors."""
+    """Return the list of available tool descriptors."""
     return list(TOOLSPECS)

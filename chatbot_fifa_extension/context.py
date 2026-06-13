@@ -14,26 +14,25 @@ import membank
 class FifaContext:
     """Holds the persistence store and config the betting tools operate on.
 
-    :param store: membank store holding Contest and Player records.
-    :param administrator: name of the administrator player whose bets carry the
-        actual match results (used to advance knockout stages and to score).
+    :param store: membank store holding Group, Contest and Player records.
+    :param admin_secret: secret that authorizes administrative tools (setting up
+        groups/teams, and later results and the knockout layout). When empty,
+        administrative tools refuse to run.
     """
 
     store: membank.LoadMemory
-    administrator: str
+    admin_secret: str = ""
 
 
 def build_context(conf: dict) -> FifaContext:
     """Build a :class:`FifaContext` from a configuration mapping.
 
-    :param conf: mapping with ``database_path`` and ``administrator`` keys,
-        matching the existing ``[chatbot_fifa_extension]`` config section. The
-        sqlite url scheme is kept identical to previous releases so existing
-        data keeps working.
+    :param conf: mapping with a ``database_path`` key and an optional
+        ``admin_secret`` key, matching the ``[chatbot_fifa_extension]`` config
+        section. The sqlite url scheme is kept identical to previous releases so
+        existing data keeps working.
     """
-    if "database_path" not in conf or "administrator" not in conf:
-        raise RuntimeError(
-            "FIFA tools require 'database_path' and 'administrator' in config"
-        )
+    if "database_path" not in conf:
+        raise RuntimeError("FIFA tools require 'database_path' in config")
     store = membank.LoadMemory(f"sqlite://{conf['database_path']}/db")
-    return FifaContext(store=store, administrator=conf["administrator"])
+    return FifaContext(store=store, admin_secret=conf.get("admin_secret", ""))

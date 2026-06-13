@@ -2,6 +2,47 @@
 from .exceptions import DrawNotAllowed
 
 
+def round_robin(teams):
+    """Return list of matchdays; each matchday a list of (home, away) pairs.
+
+    Uses the circle method so every team plays every other team exactly once.
+    """
+    teams = list(teams)
+    if len(teams) % 2:
+        teams.append(None)  # bye marker for odd team counts
+    half = len(teams) // 2
+    matchdays = []
+    for _ in range(len(teams) - 1):
+        pairs = []
+        for i in range(half):
+            home, away = teams[i], teams[-i - 1]
+            if home is not None and away is not None:
+                pairs.append((home, away))
+        matchdays.append(pairs)
+        teams.insert(1, teams.pop())  # rotate, keeping first team fixed
+    return matchdays
+
+
+def generate_group_fixtures(groups):
+    """Return an ordered list of "Home and Away" group-stage matches.
+
+    Matches are interleaved by matchday across groups (matchday 1 of every
+    group, then matchday 2, ...) to approximate a real group-stage schedule.
+
+    :param groups: iterable of objects exposing ``.name`` and ``.teams``.
+    """
+    schedule = {g.name: round_robin(g.teams) for g in groups}
+    fixtures = []
+    max_md = max((len(md) for md in schedule.values()), default=0)
+    for matchday in range(max_md):
+        for name in sorted(schedule):
+            matchdays = schedule[name]
+            if matchday < len(matchdays):
+                for home, away in matchdays[matchday]:
+                    fixtures.append(f"{home} and {away}")
+    return fixtures
+
+
 groups = {
     "A": ("Qatar", "Ecuador", "Senegal", "Netherlands"),
     "B": ("England", "Iran", "United States", "Wales"),
