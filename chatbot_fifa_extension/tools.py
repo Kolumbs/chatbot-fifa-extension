@@ -1,25 +1,36 @@
 """Framework-neutral FIFA World Cup betting capability.
 
-The operations are exposed as a list of :class:`ToolSpec` descriptors. Each
-descriptor carries a name, a human/LLM-readable description, a pydantic model
-describing its parameters (the single source of truth for the schema), and a
-plain handler ``(FifaContext, params) -> str``.
+Operations are exposed as a list of :class:`ToolSpec` descriptors (name,
+description, a pydantic params model, and a ``(FifaContext, params) -> str``
+handler). No LLM/agent SDK is imported here.
 
-The tournament is data-driven: an administrator registers the groups and their
-teams, and the group-stage fixtures are derived from them. No tournament data
-is hard-coded, and no LLM/agent SDK is imported here.
+The tournament is data-driven:
+  * an administrator registers the groups and their teams, and loads the
+    match schedule (dated fixtures);
+  * players predict the next match that has not kicked off yet - predictions
+    lock once a match starts;
+  * the administrator may override any player's prediction for any match at
+    any time, including after kickoff.
 
 Administrative tools are gated by ``admin_secret`` (validated inside the
 handler, so the gate does not rely on the calling LLM).
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+import os
 from typing import Callable
 
 import pydantic
 
-from . import fifa, memories
+from . import memories
 from .context import FifaContext
+
+
+SCHEDULE_FILE = os.path.join(
+    os.path.dirname(__file__), "data", "wc2026_group_schedule.json"
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -44,6 +55,16 @@ class RegisterGroup(AdminAuth):
     teams: list[str] = pydantic.Field(
         description="The teams competing in this group."
     )
+
+
+class AdminSetPrediction(AdminAuth):
+    """Admin override of a player's prediction for a specific match."""
+
+    player_name: str = pydantic.Field(description="The player whose pick to set.")
+    home: str = pydantic.Field(description="Home team of the match (as scheduled).")
+    away: str = pydantic.Field(description="Away team of the match (as scheduled).")
+    home_score: int = pydantic.Field(ge=0, description="Predicted home goals.")
+    away_score: int = pydantic.Field(ge=0, description="Predicted away goals.")
 
 
 class ContestRef(pydantic.BaseModel):
@@ -74,10 +95,10 @@ class PlaceBet(pydantic.BaseModel):
         description="Name of the player placing the prediction."
     )
     home_score: int = pydantic.Field(
-        ge=0, description="Predicted goals for the first team in the match."
+        ge=0, description="Predicted goals for the home (first) team."
     )
     away_score: int = pydantic.Field(
-        ge=0, description="Predicted goals for the second team in the match."
+        ge=0, description="Predicted goals for the away (second) team."
     )
 
 
@@ -95,9 +116,73 @@ class ToolSpec:
 
 
 # --------------------------------------------------------------------------- #
-# Helpers
+# Time / schedule helpers
 # --------------------------------------------------------------------------- #
-def _require_admin(ctx: FifaContext, token: str):
+def _now():
+    """Current time as a timezone-aware UTC datetime."""
+    return datetime.now(timezone.utc)
+
+
+def _kickoff(match):
+    """Parse a match kickoff into an aware datetime, or None if unparseable."""
+    try:
+        moment = datetime.fromisoformat(match.kickoff)
+    except (ValueError, TypeError):
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment
+
+
+def _has_started(match):
+    """True if the match has kicked off (predictions locked for players)."""
+    moment = _kickoff(match)
+    return moment is not None and _now() >= moment
+
+
+def _ordered_matches(ctx):
+    """All matches sorted by kickoff then number (unscheduled sort last)."""
+    far_future = datetime.max.replace(tzinfo=timezone.utc)
+    return sorted(
+        ctx.store.get("match"),
+        key=lambda m: (_kickoff(m) or far_future, m.number),
+    )
+
+
+def _label(match):
+    """Human-readable match label."""
+    return f"{match.home} vs {match.away}"
+
+
+def _describe(match):
+    """Label plus kickoff time."""
+    return f"{_label(match)} (kickoff {match.kickoff})"
+
+
+def _next_open_match(ctx, player):
+    """Next match in schedule order that is unstarted and not yet predicted."""
+    for match in _ordered_matches(ctx):
+        if str(match.number) in player.predictions:
+            continue
+        if _has_started(match):
+            continue
+        return match
+    return None
+
+
+def _find_match(ctx, home, away):
+    """Find a match by home and away team names (case-insensitive)."""
+    home, away = home.strip().lower(), away.strip().lower()
+    for match in ctx.store.get("match"):
+        if match.home.lower() == home and match.away.lower() == away:
+            return match
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Admin: auth + setup
+# --------------------------------------------------------------------------- #
+def _require_admin(ctx, token):
     """Return an error string if the admin secret is missing/wrong, else None."""
     if not ctx.admin_secret:
         return "Admin features are not configured on this bot."
@@ -106,29 +191,12 @@ def _require_admin(ctx: FifaContext, token: str):
     return None
 
 
-def _group_fixtures(ctx: FifaContext):
-    """Return the ordered group-stage fixtures derived from registered groups."""
-    groups = list(ctx.store.get("group"))
-    return fifa.generate_group_fixtures(groups)
-
-
-def _next_unbet(player):
-    """Return the next match the player has not predicted yet, or ''. """
-    for game, result in player.bets:
-        if not result:
-            return game
-    return ""
-
-
-# --------------------------------------------------------------------------- #
-# Administrative handlers (gated by admin_secret)
-# --------------------------------------------------------------------------- #
 def authenticate_admin(ctx: FifaContext, args: AdminAuth) -> str:
     """Check whether the provided admin secret is correct."""
     err = _require_admin(ctx, args.admin_secret)
     if err:
         return err
-    return "Verified: the admin secret is correct - you may set up the tournament."
+    return "Verified: the admin secret is correct - you may manage the tournament."
 
 
 def register_group(ctx: FifaContext, args: RegisterGroup) -> str:
@@ -150,15 +218,66 @@ def list_groups(ctx: FifaContext, _args: NoArgs) -> str:
     return "\n".join(f"Group {g.name}: {', '.join(g.teams)}" for g in groups)
 
 
+def load_schedule(ctx: FifaContext, args: AdminAuth) -> str:
+    """Load the bundled match schedule, replacing any existing matches."""
+    err = _require_admin(ctx, args.admin_secret)
+    if err:
+        return err
+    try:
+        with open(SCHEDULE_FILE, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as exc:
+        return f"Could not read the bundled schedule: {exc}"
+    for match in list(ctx.store.get("match")):
+        ctx.store.delete(match)
+    for entry in data:
+        ctx.store.put(
+            memories.Match(
+                number=int(entry["number"]),
+                stage=entry.get("stage", "group"),
+                home=entry["home"],
+                away=entry["away"],
+                kickoff=entry["kickoff"],
+            )
+        )
+    if not data:
+        return "The bundled schedule is empty."
+    first = min(e["kickoff"] for e in data)
+    last = max(e["kickoff"] for e in data)
+    return f"Loaded {len(data)} matches (from {first} to {last})."
+
+
 def clear_tournament(ctx: FifaContext, args: AdminAuth) -> str:
-    """Delete all registered groups (use to redo the tournament setup)."""
+    """Delete all registered groups and matches (use to redo setup)."""
     err = _require_admin(ctx, args.admin_secret)
     if err:
         return err
     groups = list(ctx.store.get("group"))
+    matches = list(ctx.store.get("match"))
     for group in groups:
         ctx.store.delete(group)
-    return f"Cleared {len(groups)} group(s)."
+    for match in matches:
+        ctx.store.delete(match)
+    return f"Cleared {len(groups)} group(s) and {len(matches)} match(es)."
+
+
+def admin_set_prediction(ctx: FifaContext, args: AdminSetPrediction) -> str:
+    """Override a player's prediction for a match (ignores the kickoff lock)."""
+    err = _require_admin(ctx, args.admin_secret)
+    if err:
+        return err
+    player = ctx.store.get.player(name=args.player_name)
+    if not player:
+        return f"No player named '{args.player_name}'."
+    match = _find_match(ctx, args.home, args.away)
+    if not match:
+        return f"No match '{args.home} vs {args.away}' in the schedule."
+    player.predictions[str(match.number)] = [args.home_score, args.away_score]
+    ctx.store.put(player)
+    return (
+        f"Set {args.player_name}'s prediction for {_label(match)} to "
+        f"{args.home_score}:{args.away_score}."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -175,40 +294,37 @@ def find_or_create_contest(ctx: FifaContext, args: ContestRef) -> str:
 
 
 def register_player(ctx: FifaContext, args: RegisterPlayer) -> str:
-    """Register (or re-join) a player in a contest and seed their bet card."""
+    """Register (or re-join) a player in a contest."""
     contest = ctx.store.get.contest(code=args.contest_code)
     if not contest:
         return (
             f"Contest '{args.contest_code}' does not exist. "
             "Create it first with find_or_create_contest."
         )
-    fixtures = _group_fixtures(ctx)
-    if not fixtures:
+    if not list(ctx.store.get("match")):
         return (
-            "The tournament isn't set up yet - no groups have been registered. "
-            "An admin needs to register the groups and teams first."
+            "The match schedule isn't loaded yet. An admin needs to load the "
+            "schedule first."
         )
     player = ctx.store.get.player(name=args.name)
     created = False
     if not player:
         player = memories.Player(name=args.name)
+        ctx.store.put(player)
         created = True
-    if not player.bets:
-        player.bets = [[fixture, 0] for fixture in fixtures]
-    ctx.store.put(player)
     if args.name not in contest.players:
         contest.players.append(args.name)
         ctx.store.put(contest)
     verb = "Registered" if created else "Welcome back,"
-    nxt = _next_unbet(player)
+    nxt = _next_open_match(ctx, player)
     if nxt:
         return (
             f"{verb} {args.name} in contest '{args.contest_code}'. "
-            f"Next match to predict: {nxt}."
+            f"Next match to predict: {_describe(nxt)}."
         )
     return (
         f"{verb} {args.name} in contest '{args.contest_code}'. "
-        "You have predicted every match."
+        "There are no upcoming matches to predict right now."
     )
 
 
@@ -217,47 +333,46 @@ def get_next_match(ctx: FifaContext, args: PlayerRef) -> str:
     player = ctx.store.get.player(name=args.player_name)
     if not player:
         return f"No player named '{args.player_name}'. Register first."
-    nxt = _next_unbet(player)
+    nxt = _next_open_match(ctx, player)
     if nxt:
-        return f"Next match awaiting {args.player_name}'s prediction: {nxt}."
-    return f"{args.player_name} has predicted every match."
+        return f"Next match awaiting {args.player_name}'s prediction: {_describe(nxt)}."
+    return f"{args.player_name} has no upcoming matches to predict right now."
 
 
 def place_bet(ctx: FifaContext, args: PlaceBet) -> str:
-    """Record the player's predicted score for the match awaiting a prediction."""
+    """Record the player's predicted score for their next upcoming match."""
     player = ctx.store.get.player(name=args.player_name)
     if not player:
         return f"No player named '{args.player_name}'. Register first."
-    match = ""
-    for bet in player.bets:
-        if not bet[1]:
-            match = bet[0]
-            bet[1] = [args.home_score, args.away_score]
-            break
+    match = _next_open_match(ctx, player)
     if not match:
-        return f"{args.player_name} has no match awaiting a prediction."
+        return (
+            f"{args.player_name} has no upcoming matches to predict right now."
+        )
+    player.predictions[str(match.number)] = [args.home_score, args.away_score]
     ctx.store.put(player)
-    nxt = _next_unbet(player)
-    tail = f" Next match: {nxt}." if nxt else " That was the last match."
+    nxt = _next_open_match(ctx, player)
+    tail = f" Next match: {_describe(nxt)}." if nxt else " That was the last open match."
     return (
-        f"Recorded {args.player_name}'s prediction for {match}: "
+        f"Recorded {args.player_name}'s prediction for {_label(match)}: "
         f"{args.home_score}:{args.away_score}.{tail}"
     )
 
 
 def cancel_last_bet(ctx: FifaContext, args: PlayerRef) -> str:
-    """Cancel the player's most recent prediction so it can be re-entered."""
+    """Cancel the player's latest still-open prediction so it can be re-entered."""
     player = ctx.store.get.player(name=args.player_name)
     if not player:
         return f"No player named '{args.player_name}'. Register first."
-    canceled = fifa.remove_previous_bet(player.bets)
-    ctx.store.put(player)
-    if canceled:
-        return (
-            f"Canceled {args.player_name}'s prediction for {canceled}. "
-            "You can predict it again."
-        )
-    return f"{args.player_name} has no predictions to cancel."
+    for match in reversed(_ordered_matches(ctx)):
+        if str(match.number) in player.predictions and not _has_started(match):
+            del player.predictions[str(match.number)]
+            ctx.store.put(player)
+            return (
+                f"Canceled {args.player_name}'s prediction for {_label(match)}. "
+                "You can predict it again."
+            )
+    return f"{args.player_name} has no open predictions to cancel."
 
 
 # --------------------------------------------------------------------------- #
@@ -287,11 +402,25 @@ TOOLSPECS: list[ToolSpec] = [
         list_groups,
     ),
     ToolSpec(
+        "load_schedule",
+        "ADMIN: load the official match schedule (dated fixtures), replacing "
+        "any existing matches (requires the admin secret).",
+        AdminAuth,
+        load_schedule,
+    ),
+    ToolSpec(
         "clear_tournament",
-        "ADMIN: delete all registered groups to redo setup "
+        "ADMIN: delete all registered groups and matches to redo setup "
         "(requires the admin secret).",
         AdminAuth,
         clear_tournament,
+    ),
+    ToolSpec(
+        "admin_set_prediction",
+        "ADMIN: set or override any player's prediction for a specific match, "
+        "even after kickoff (requires the admin secret).",
+        AdminSetPrediction,
+        admin_set_prediction,
     ),
     # player
     ToolSpec(
@@ -308,19 +437,20 @@ TOOLSPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_next_match",
-        "Get the next match that is awaiting a prediction from the given player.",
+        "Get the next match awaiting a prediction from the given player.",
         PlayerRef,
         get_next_match,
     ),
     ToolSpec(
         "place_bet",
-        "Record a player's predicted score for the match awaiting their prediction.",
+        "Record a player's predicted score for their next upcoming match. "
+        "Refused once that match has kicked off.",
         PlaceBet,
         place_bet,
     ),
     ToolSpec(
         "cancel_last_bet",
-        "Cancel a player's most recent prediction so it can be entered again.",
+        "Cancel a player's latest still-open prediction so it can be entered again.",
         PlayerRef,
         cancel_last_bet,
     ),

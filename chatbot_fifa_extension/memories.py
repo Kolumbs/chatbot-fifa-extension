@@ -1,4 +1,4 @@
-"""Permanent memory objects"""
+"""Permanent memory objects."""
 import dataclasses
 
 
@@ -6,23 +6,41 @@ import dataclasses
 class Group:
     """A tournament group and the teams competing in it.
 
-    Registered by the administrator; the group-stage fixtures are derived from
-    the registered groups (see fifa.generate_group_fixtures).
+    Registered by the administrator; used for standings/scoring. Match fixtures
+    come from the loaded schedule (see Match), not derived from groups.
     """
     name: str = dataclasses.field(default=None, metadata={"key": True})
     teams: list = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass()
+class Match:
+    """A scheduled tournament match.
+
+    number is the schedule order/id. kickoff is an ISO-8601 UTC timestamp;
+    predictions for a match lock once kickoff has passed (admins excepted).
+    home_goals/away_goals hold the actual result once known (None until played).
+    """
+    number: int = dataclasses.field(default=0, metadata={"key": True})
+    stage: str = "group"
+    home: str = ""
+    away: str = ""
+    kickoff: str = ""  # ISO-8601 UTC, e.g. "2026-06-11T19:00:00+00:00"
+    result: list = dataclasses.field(default_factory=list)  # [] until played, then [h, a]
+
+
+@dataclasses.dataclass()
 class Contest:
-    """Unique contest that contains participant list"""
+    """Unique contest that contains participant list."""
     code: str = dataclasses.field(default=None, metadata={"key": True})
     players: list = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass()
 class Player:
-    """Information about player and it's bets"""
+    """A player and their per-match score predictions.
+
+    predictions maps str(match number) -> [home_goals, away_goals].
+    """
     name: str = dataclasses.field(default=None, metadata={"key": True})
-    bets: list = dataclasses.field(default_factory=list)
-    next_bet: str = ""
+    predictions: dict = dataclasses.field(default_factory=dict)
