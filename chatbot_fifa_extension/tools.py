@@ -161,8 +161,9 @@ def _describe(match):
 
 def _next_open_match(ctx, player):
     """Next match in schedule order that is unstarted and not yet predicted."""
+    preds = player.predictions or {}
     for match in _ordered_matches(ctx):
-        if str(match.number) in player.predictions:
+        if str(match.number) in preds:
             continue
         if _has_started(match):
             continue
@@ -177,6 +178,13 @@ def _find_match(ctx, home, away):
         if match.home.lower() == home and match.away.lower() == away:
             return match
     return None
+
+
+def _ensure_predictions(player):
+    """Return predictions as a dict, coercing legacy/None records in place."""
+    if not isinstance(player.predictions, dict):
+        player.predictions = {}
+    return player.predictions
 
 
 # --------------------------------------------------------------------------- #
@@ -272,7 +280,7 @@ def admin_set_prediction(ctx: FifaContext, args: AdminSetPrediction) -> str:
     match = _find_match(ctx, args.home, args.away)
     if not match:
         return f"No match '{args.home} vs {args.away}' in the schedule."
-    player.predictions[str(match.number)] = [args.home_score, args.away_score]
+    _ensure_predictions(player)[str(match.number)] = [args.home_score, args.away_score]
     ctx.store.put(player)
     return (
         f"Set {args.player_name}'s prediction for {_label(match)} to "
@@ -349,7 +357,7 @@ def place_bet(ctx: FifaContext, args: PlaceBet) -> str:
         return (
             f"{args.player_name} has no upcoming matches to predict right now."
         )
-    player.predictions[str(match.number)] = [args.home_score, args.away_score]
+    _ensure_predictions(player)[str(match.number)] = [args.home_score, args.away_score]
     ctx.store.put(player)
     nxt = _next_open_match(ctx, player)
     tail = f" Next match: {_describe(nxt)}." if nxt else " That was the last open match."
@@ -364,9 +372,10 @@ def cancel_last_bet(ctx: FifaContext, args: PlayerRef) -> str:
     player = ctx.store.get.player(name=args.player_name)
     if not player:
         return f"No player named '{args.player_name}'. Register first."
+    preds = _ensure_predictions(player)
     for match in reversed(_ordered_matches(ctx)):
-        if str(match.number) in player.predictions and not _has_started(match):
-            del player.predictions[str(match.number)]
+        if str(match.number) in preds and not _has_started(match):
+            del preds[str(match.number)]
             ctx.store.put(player)
             return (
                 f"Canceled {args.player_name}'s prediction for {_label(match)}. "
