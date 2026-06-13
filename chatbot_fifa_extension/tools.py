@@ -73,6 +73,12 @@ class ContestRef(pydantic.BaseModel):
     code: str = pydantic.Field(description="Short code identifying the contest.")
 
 
+class DeleteContest(AdminAuth):
+    """Delete a contest by its code."""
+
+    code: str = pydantic.Field(description="Code of the contest to delete.")
+
+
 class RegisterPlayer(pydantic.BaseModel):
     """Join a contest under a player name."""
 
@@ -288,6 +294,66 @@ def admin_set_prediction(ctx: FifaContext, args: AdminSetPrediction) -> str:
     )
 
 
+def delete_contest(ctx: FifaContext, args: DeleteContest) -> str:
+    """Delete a contest (does not delete the players themselves)."""
+    err = _require_admin(ctx, args.admin_secret)
+    if err:
+        return err
+    contest = ctx.store.get.contest(code=args.code)
+    if not contest:
+        return f"No contest '{args.code}'."
+    ctx.store.delete(contest)
+    return f"Deleted contest '{args.code}'."
+
+
+# --------------------------------------------------------------------------- #
+# Lookup handlers (read-only; let the bot report real state, not guess)
+# --------------------------------------------------------------------------- #
+def list_contests(ctx: FifaContext, _args: NoArgs) -> str:
+    """List every contest and who is in it."""
+    contests = sorted(ctx.store.get("contest"), key=lambda c: c.code)
+    if not contests:
+        return "There are no contests yet."
+    lines = []
+    for contest in contests:
+        who = ", ".join(contest.players) if contest.players else "no players"
+        lines.append(f"{contest.code}: {len(contest.players)} player(s) ({who})")
+    return "\n".join(lines)
+
+
+def show_contest(ctx: FifaContext, args: ContestRef) -> str:
+    """Show the players in a contest and how many predictions each has made."""
+    contest = ctx.store.get.contest(code=args.code)
+    if not contest:
+        return f"No contest '{args.code}'."
+    if not contest.players:
+        return f"Contest '{args.code}' has no players yet."
+    lines = []
+    for name in contest.players:
+        player = ctx.store.get.player(name=name)
+        preds = player.predictions if player and isinstance(player.predictions, dict) else {}
+        lines.append(f"{name}: {len(preds)} prediction(s)")
+    return f"Contest '{args.code}':\n" + "\n".join(lines)
+
+
+def get_predictions(ctx: FifaContext, args: PlayerRef) -> str:
+    """List all of a player's saved predictions."""
+    player = ctx.store.get.player(name=args.player_name)
+    if not player:
+        return f"No player named '{args.player_name}'."
+    preds = player.predictions if isinstance(player.predictions, dict) else {}
+    if not preds:
+        return f"{args.player_name} has no predictions yet."
+    by_number = {str(m.number): m for m in ctx.store.get("match")}
+    lines = []
+    for number in sorted(preds, key=lambda x: int(x)):
+        match = by_number.get(number)
+        label = _label(match) if match else f"match {number}"
+        home, away = preds[number]
+        lines.append(f"{label}: {home}:{away}")
+    return f"{args.player_name}'s predictions:\n" + "\n".join(lines)
+
+
 # --------------------------------------------------------------------------- #
 # Player handlers
 # --------------------------------------------------------------------------- #
@@ -430,6 +496,31 @@ TOOLSPECS: list[ToolSpec] = [
         "even after kickoff (requires the admin secret).",
         AdminSetPrediction,
         admin_set_prediction,
+    ),
+    ToolSpec(
+        "delete_contest",
+        "ADMIN: delete a contest by its code (requires the admin secret).",
+        DeleteContest,
+        delete_contest,
+    ),
+    # lookups (read-only) - use these to report real state instead of guessing
+    ToolSpec(
+        "list_contests",
+        "List every contest and who is in each one.",
+        NoArgs,
+        list_contests,
+    ),
+    ToolSpec(
+        "show_contest",
+        "Show the players in a contest and how many predictions each has made.",
+        ContestRef,
+        show_contest,
+    ),
+    ToolSpec(
+        "get_predictions",
+        "List all of a player's saved predictions (their match picks).",
+        PlayerRef,
+        get_predictions,
     ),
     # player
     ToolSpec(
