@@ -76,22 +76,9 @@ class SetResult(AdminAuth):
     away_score: int = pydantic.Field(ge=0, description="Actual away goals.")
 
 
-class ContestRef(pydantic.BaseModel):
-    """Reference to a contest by its code."""
-
-    code: str = pydantic.Field(description="Short code identifying the contest.")
-
-
-class DeleteContest(AdminAuth):
-    """Delete a contest by its code."""
-
-    code: str = pydantic.Field(description="Code of the contest to delete.")
-
-
 class RegisterPlayer(pydantic.BaseModel):
-    """Join a contest under a player name."""
+    """Register under a player name."""
 
-    contest_code: str = pydantic.Field(description="Code of the contest to join.")
     name: str = pydantic.Field(
         description="Display name the player will be known by."
     )
@@ -329,46 +316,19 @@ def set_result(ctx: FifaContext, args: SetResult) -> str:
     )
 
 
-def delete_contest(ctx: FifaContext, args: DeleteContest) -> str:
-    """Delete a contest (does not delete the players themselves)."""
-    err = _require_admin(ctx, args.admin_secret)
-    if err:
-        return err
-    contest = ctx.store.get.contest(code=args.code)
-    if not contest:
-        return f"No contest '{args.code}'."
-    ctx.store.delete(contest)
-    return f"Deleted contest '{args.code}'."
-
-
 # --------------------------------------------------------------------------- #
 # Lookup handlers (read-only; let the bot report real state, not guess)
 # --------------------------------------------------------------------------- #
-def list_contests(ctx: FifaContext, _args: NoArgs) -> str:
-    """List every contest and who is in it."""
-    contests = sorted(ctx.store.get("contest"), key=lambda c: c.code)
-    if not contests:
-        return "There are no contests yet."
+def list_players(ctx: FifaContext, _args: NoArgs) -> str:
+    """List every registered player and how many predictions each has made."""
+    players = sorted(ctx.store.get("player"), key=lambda p: p.name)
+    if not players:
+        return "No players are registered yet."
     lines = []
-    for contest in contests:
-        who = ", ".join(contest.players) if contest.players else "no players"
-        lines.append(f"{contest.code}: {len(contest.players)} player(s) ({who})")
+    for player in players:
+        preds = player.predictions if isinstance(player.predictions, dict) else {}
+        lines.append(f"{player.name}: {len(preds)} prediction(s)")
     return "\n".join(lines)
-
-
-def show_contest(ctx: FifaContext, args: ContestRef) -> str:
-    """Show the players in a contest and how many predictions each has made."""
-    contest = ctx.store.get.contest(code=args.code)
-    if not contest:
-        return f"No contest '{args.code}'."
-    if not contest.players:
-        return f"Contest '{args.code}' has no players yet."
-    lines = []
-    for name in contest.players:
-        player = ctx.store.get.player(name=name)
-        preds = player.predictions if player and isinstance(player.predictions, dict) else {}
-        lines.append(f"{name}: {len(preds)} prediction(s)")
-    return f"Contest '{args.code}':\n" + "\n".join(lines)
 
 
 def get_predictions(ctx: FifaContext, args: PlayerRef) -> str:
@@ -389,20 +349,16 @@ def get_predictions(ctx: FifaContext, args: PlayerRef) -> str:
     return f"{args.player_name}'s predictions:\n" + "\n".join(lines)
 
 
-def standings(ctx: FifaContext, args: ContestRef) -> str:
-    """Score a contest's players against entered results and rank them.
+def standings(ctx: FifaContext, _args: NoArgs) -> str:
+    """Score all registered players against entered results and rank them.
 
     Scoring (the original scheme): 6 points for an exact score, 3 for the
     correct outcome; on a match nobody predicted exactly, the closest correct
     prediction (by goal difference) earns +2, or +1 each if several tie.
     """
-    contest = ctx.store.get.contest(code=args.code)
-    if not contest:
-        return f"No contest '{args.code}'."
-    players = [ctx.store.get.player(name=n) for n in contest.players]
-    players = [p for p in players if p]
+    players = list(ctx.store.get("player"))
     if not players:
-        return f"Contest '{args.code}' has no players yet."
+        return "No players are registered yet."
     scores = {p.name: 0 for p in players}
     played = [m for m in _ordered_matches(ctx) if m.result]
     if not played:
@@ -433,7 +389,7 @@ def standings(ctx: FifaContext, args: ContestRef) -> str:
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     lines = [f"{i + 1}. {name} - {pts} pts" for i, (name, pts) in enumerate(ranked)]
     return (
-        f"Standings for '{args.code}' (after {len(played)} played match(es)):\n"
+        f"Standings (after {len(played)} played match(es)):\n"
         + "\n".join(lines)
     )
 
@@ -441,24 +397,8 @@ def standings(ctx: FifaContext, args: ContestRef) -> str:
 # --------------------------------------------------------------------------- #
 # Player handlers
 # --------------------------------------------------------------------------- #
-def find_or_create_contest(ctx: FifaContext, args: ContestRef) -> str:
-    """Find a contest by code, creating it if it does not exist."""
-    contest = ctx.store.get.contest(code=args.code)
-    if contest:
-        count = len(contest.players)
-        return f"Contest '{args.code}' already exists with {count} player(s)."
-    ctx.store.put(memories.Contest(code=args.code))
-    return f"Created new contest '{args.code}'."
-
-
 def register_player(ctx: FifaContext, args: RegisterPlayer) -> str:
-    """Register (or re-join) a player in a contest."""
-    contest = ctx.store.get.contest(code=args.contest_code)
-    if not contest:
-        return (
-            f"Contest '{args.contest_code}' does not exist. "
-            "Create it first with find_or_create_contest."
-        )
+    """Register (or welcome back) a player by name."""
     if not list(ctx.store.get("match")):
         return (
             "The match schedule isn't loaded yet. An admin needs to load the "
@@ -470,20 +410,11 @@ def register_player(ctx: FifaContext, args: RegisterPlayer) -> str:
         player = memories.Player(name=args.name)
         ctx.store.put(player)
         created = True
-    if args.name not in contest.players:
-        contest.players.append(args.name)
-        ctx.store.put(contest)
     verb = "Registered" if created else "Welcome back,"
     nxt = _next_open_match(ctx, player)
     if nxt:
-        return (
-            f"{verb} {args.name} in contest '{args.contest_code}'. "
-            f"Next match to predict: {_describe(nxt)}."
-        )
-    return (
-        f"{verb} {args.name} in contest '{args.contest_code}'. "
-        "There are no upcoming matches to predict right now."
-    )
+        return f"{verb} {args.name}. Next match to predict: {_describe(nxt)}."
+    return f"{verb} {args.name}. There are no upcoming matches to predict right now."
 
 
 def get_next_match(ctx: FifaContext, args: PlayerRef) -> str:
@@ -592,24 +523,12 @@ TOOLSPECS: list[ToolSpec] = [
         SetResult,
         set_result,
     ),
-    ToolSpec(
-        "delete_contest",
-        "ADMIN: delete a contest by its code (requires the admin secret).",
-        DeleteContest,
-        delete_contest,
-    ),
     # lookups (read-only) - use these to report real state instead of guessing
     ToolSpec(
-        "list_contests",
-        "List every contest and who is in each one.",
+        "list_players",
+        "List every registered player and how many predictions each has made.",
         NoArgs,
-        list_contests,
-    ),
-    ToolSpec(
-        "show_contest",
-        "Show the players in a contest and how many predictions each has made.",
-        ContestRef,
-        show_contest,
+        list_players,
     ),
     ToolSpec(
         "get_predictions",
@@ -619,21 +538,15 @@ TOOLSPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "standings",
-        "Show the scoreboard for a contest, scoring players' predictions against "
-        "the entered match results.",
-        ContestRef,
+        "Show the scoreboard, scoring all players' predictions against the "
+        "entered match results.",
+        NoArgs,
         standings,
     ),
     # player
     ToolSpec(
-        "find_or_create_contest",
-        "Find a betting contest by its code, creating it if it does not exist.",
-        ContestRef,
-        find_or_create_contest,
-    ),
-    ToolSpec(
         "register_player",
-        "Register a player (by name) in a contest so they can place predictions.",
+        "Register a player by name so they can place predictions.",
         RegisterPlayer,
         register_player,
     ),

@@ -30,13 +30,6 @@ class Match:
 
 
 @dataclasses.dataclass()
-class Contest:
-    """Unique contest that contains participant list."""
-    code: str = dataclasses.field(default=None, metadata={"key": True})
-    players: list = dataclasses.field(default_factory=list)
-
-
-@dataclasses.dataclass()
 class Player:
     """A player and their per-match score predictions.
 
