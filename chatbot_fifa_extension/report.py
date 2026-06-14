@@ -18,7 +18,7 @@ For PDF output install reportlab once:  pip install reportlab
 
 import argparse
 import tomllib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import fifa
 from .context import build_context
@@ -34,6 +34,42 @@ GREEN = "#1a7f37"
 
 def _preds(player):
     return player.predictions if isinstance(player.predictions, dict) else {}
+
+
+def _kickoff(match):
+    try:
+        moment = datetime.fromisoformat(match.kickoff)
+    except (ValueError, TypeError):
+        return None
+    return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
+
+
+def upcoming(ctx, exclude=(), hours=24):
+    """Preview not-yet-played matches kicking off within the next `hours`.
+
+    Returns [(match, [(name, pick), ...]), ...] so players can see everyone's
+    predictions ahead of those matches. No scoring (results aren't in yet).
+    """
+    exclude = set(exclude)
+    players = [
+        p for p in sorted(ctx.store.get("player"), key=lambda p: p.name)
+        if p.name not in exclude
+    ]
+    now = datetime.now(timezone.utc)
+    horizon = now + timedelta(hours=hours)
+    rows = []
+    for match in sorted(ctx.store.get("match"), key=lambda m: m.number):
+        if match.result:
+            continue
+        moment = _kickoff(match)
+        if moment is None or not (now <= moment < horizon):
+            continue
+        picks = []
+        for player in players:
+            pred = _preds(player).get(str(match.number))
+            picks.append((player.name, f"{pred[0]}:{pred[1]}" if pred else "—"))
+        rows.append((match, picks))
+    return rows
 
 
 def compute(ctx, exclude=(), since=None):
@@ -101,7 +137,8 @@ def compute(ctx, exclude=(), since=None):
     return ranking, before, delta, match_rows
 
 
-def to_markdown(ranking, before, delta, match_rows, since=None):
+def to_markdown(ranking, before, delta, match_rows, since=None,
+                upcoming_rows=(), hours=24):
     """Render the report as Markdown text."""
     gen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = ["# FIFA World Cup 2026 - Prediction Pool Report",
@@ -131,10 +168,20 @@ def to_markdown(ranking, before, delta, match_rows, since=None):
         for name, pick, note, pts in rows:
             lines.append(f"| {name} | {pick} | {note} | {pts} |")
         lines.append("")
+    if upcoming_rows:
+        lines += ["", f"## Upcoming (next {hours}h) - predictions preview"]
+        for match, picks in upcoming_rows:
+            lines.append(f"### #{match.number} {match.home} vs {match.away}")
+            lines += [f"_kickoff {match.kickoff}_", "", "| Player | Pick |",
+                      "|--------|------|"]
+            for name, pick in picks:
+                lines.append(f"| {name} | {pick} |")
+            lines.append("")
     return "\n".join(lines)
 
 
-def to_pdf(ranking, before, delta, match_rows, since, path):
+def to_pdf(ranking, before, delta, match_rows, since, path,
+           upcoming_rows=(), hours=24):
     """Write the report as a styled PDF (requires reportlab)."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -195,6 +242,19 @@ def to_pdf(ranking, before, delta, match_rows, since, path):
         el.append(styled([["Player", "Pick", "Scoring", "Pts"]] +
                          [[n, pk, nt, str(pt)] for n, pk, nt, pt in rows],
                          [4 * cm, 2 * cm, 7 * cm, 1.3 * cm], sub))
+    if upcoming_rows:
+        amber = colors.HexColor("#9c6500")
+        el += [Spacer(1, 0.5 * cm),
+               Paragraph(f"Upcoming (next {hours}h) — predictions preview",
+                         styles["Heading2"])]
+        for match, picks in upcoming_rows:
+            el.append(Spacer(1, 0.2 * cm))
+            el.append(Paragraph(
+                f"#{match.number} {match.home} vs {match.away} "
+                f"<font size=8 color=grey>(kickoff {match.kickoff})</font>",
+                styles["Heading4"]))
+            el.append(styled([["Player", "Pick"]] + [[n, pk] for n, pk in picks],
+                             [6 * cm, 3 * cm], amber))
     SimpleDocTemplate(path, pagesize=A4,
                       title="WC2026 Prediction Pool Report").build(el)
 
@@ -218,6 +278,10 @@ def main(argv=None):
         "--from", dest="since", type=int, default=None,
         help="Update mode: detail only matches from this match number onward, "
         "and split standings into Before (black) + Since (green).")
+    parser.add_argument(
+        "--upcoming", type=int, default=24,
+        help="Hours ahead to preview not-yet-played matches' predictions "
+        "(default 24; 0 to disable).")
     args = parser.parse_args(argv)
 
     if args.conf:
@@ -228,13 +292,16 @@ def main(argv=None):
     ctx = build_context({"database_path": database_path})
     exclude = [x.strip() for x in args.exclude.split(",") if x.strip()]
     ranking, before, delta, match_rows = compute(ctx, exclude, args.since)
+    upcoming_rows = upcoming(ctx, exclude, args.upcoming) if args.upcoming else []
 
     if args.md:
         with open(args.md, "w", encoding="utf-8") as handle:
-            handle.write(to_markdown(ranking, before, delta, match_rows, args.since))
+            handle.write(to_markdown(ranking, before, delta, match_rows,
+                                     args.since, upcoming_rows, args.upcoming))
         print(f"Wrote {args.md}")
     try:
-        to_pdf(ranking, before, delta, match_rows, args.since, args.pdf)
+        to_pdf(ranking, before, delta, match_rows, args.since, args.pdf,
+               upcoming_rows, args.upcoming)
         print(f"Wrote {args.pdf}")
     except ImportError:
         print("reportlab not installed - PDF skipped. Install: pip install reportlab")
