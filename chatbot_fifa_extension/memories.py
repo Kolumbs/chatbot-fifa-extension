@@ -33,7 +33,12 @@ class Match:
 class Player:
     """A player and their per-match score predictions.
 
+    name is the display name (key). talker links the player to a browser/session
+    identity (from the conversation); betting actions resolve the player by
+    talker, so the player never has to re-state their name. An admin can repoint
+    talker if the player loses their session (cleared cookies).
     predictions maps str(match number) -> [home_goals, away_goals].
     """
     name: str = dataclasses.field(default=None, metadata={"key": True})
+    talker: str = ""
     predictions: dict = dataclasses.field(default_factory=dict)

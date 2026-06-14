@@ -22,6 +22,7 @@ class FifaContext:
 
     store: membank.LoadMemory
     admin_secret: str = ""
+    talker: str = ""  # the current caller's session identity (set per request)
 
 
 def build_context(conf: dict) -> FifaContext:

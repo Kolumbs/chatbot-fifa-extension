@@ -91,11 +91,8 @@ class PlayerRef(pydantic.BaseModel):
 
 
 class PlaceBet(pydantic.BaseModel):
-    """Predicted score for the match currently awaiting the player's bet."""
+    """Predicted score for the match currently awaiting the caller's bet."""
 
-    player_name: str = pydantic.Field(
-        description="Name of the player placing the prediction."
-    )
     home_score: int = pydantic.Field(
         ge=0, description="Predicted goals for the home (first) team."
     )
@@ -105,13 +102,21 @@ class PlaceBet(pydantic.BaseModel):
 
 
 class UpdatePrediction(pydantic.BaseModel):
-    """Correct a player's prediction for a specific (not-yet-started) match."""
+    """Correct the caller's prediction for a specific (not-yet-started) match."""
 
-    player_name: str = pydantic.Field(description="Name of the player.")
     home: str = pydantic.Field(description="Home team of the match to fix.")
     away: str = pydantic.Field(description="Away team of the match to fix.")
     home_score: int = pydantic.Field(ge=0, description="Corrected home goals.")
     away_score: int = pydantic.Field(ge=0, description="Corrected away goals.")
+
+
+class RelinkPlayer(AdminAuth):
+    """Repoint a player's record to a new session id (cookie-clear recovery)."""
+
+    name: str = pydantic.Field(description="Display name of the player to relink.")
+    talker: str = pydantic.Field(
+        description="The new session id (talker) to attach to that player."
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -197,6 +202,37 @@ def _ensure_predictions(player):
     if not isinstance(player.predictions, dict):
         player.predictions = {}
     return player.predictions
+
+
+NEED_NAME = (
+    "I don't know who you are yet - what display name should I register you "
+    "under?"
+)
+
+
+def _player_by_talker(ctx):
+    """Find the player linked to the current caller's talker, if any."""
+    if not ctx.talker:
+        return None
+    for player in ctx.store.get("player"):
+        if getattr(player, "talker", "") == ctx.talker:
+            return player
+    return None
+
+
+def _format_predictions(ctx, player):
+    """Render a player's saved predictions as text."""
+    preds = player.predictions if isinstance(player.predictions, dict) else {}
+    if not preds:
+        return f"{player.name} has no predictions yet."
+    by_number = {str(m.number): m for m in ctx.store.get("match")}
+    lines = []
+    for number in sorted(preds, key=lambda x: int(x)):
+        match = by_number.get(number)
+        label = _label(match) if match else f"match {number}"
+        home, away = preds[number]
+        lines.append(f"{label}: {home}:{away}")
+    return f"{player.name}'s predictions:\n" + "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -321,37 +357,58 @@ def set_result(ctx: FifaContext, args: SetResult) -> str:
     )
 
 
+def relink_player(ctx: FifaContext, args: RelinkPlayer) -> str:
+    """Repoint a player's record to a new session id (cookie-clear recovery)."""
+    err = _require_admin(ctx, args.admin_secret)
+    if err:
+        return err
+    player = ctx.store.get.player(name=args.name)
+    if not player:
+        return f"No player named '{args.name}'."
+    player.talker = args.talker.strip()
+    ctx.store.put(player)
+    return f"Relinked {args.name} to session id {player.talker}."
+
+
 # --------------------------------------------------------------------------- #
 # Lookup handlers (read-only; let the bot report real state, not guess)
 # --------------------------------------------------------------------------- #
 def list_players(ctx: FifaContext, _args: NoArgs) -> str:
-    """List every registered player and how many predictions each has made."""
+    """List every registered player, their prediction count and link status."""
     players = sorted(ctx.store.get("player"), key=lambda p: p.name)
     if not players:
         return "No players are registered yet."
     lines = []
     for player in players:
         preds = player.predictions if isinstance(player.predictions, dict) else {}
-        lines.append(f"{player.name}: {len(preds)} prediction(s)")
+        linked = "linked" if getattr(player, "talker", "") else "NOT linked"
+        lines.append(f"{player.name}: {len(preds)} prediction(s) ({linked})")
     return "\n".join(lines)
 
 
 def get_predictions(ctx: FifaContext, args: PlayerRef) -> str:
-    """List all of a player's saved predictions."""
+    """List all of a named player's saved predictions."""
     player = ctx.store.get.player(name=args.player_name)
     if not player:
         return f"No player named '{args.player_name}'."
-    preds = player.predictions if isinstance(player.predictions, dict) else {}
-    if not preds:
-        return f"{args.player_name} has no predictions yet."
-    by_number = {str(m.number): m for m in ctx.store.get("match")}
-    lines = []
-    for number in sorted(preds, key=lambda x: int(x)):
-        match = by_number.get(number)
-        label = _label(match) if match else f"match {number}"
-        home, away = preds[number]
-        lines.append(f"{label}: {home}:{away}")
-    return f"{args.player_name}'s predictions:\n" + "\n".join(lines)
+    return _format_predictions(ctx, player)
+
+
+def my_predictions(ctx: FifaContext, _args: NoArgs) -> str:
+    """List the caller's own saved predictions."""
+    me = _player_by_talker(ctx)
+    if not me:
+        return NEED_NAME
+    return _format_predictions(ctx, me)
+
+
+def whoami(ctx: FifaContext, _args: NoArgs) -> str:
+    """Return the caller's session id (talker), e.g. for admin relinking."""
+    if not ctx.talker:
+        return "I can't see a session id for you."
+    me = _player_by_talker(ctx)
+    who = f" (registered as {me.name})" if me else " (not registered yet)"
+    return f"Your session id is: {ctx.talker}{who}"
 
 
 def standings(ctx: FifaContext, _args: NoArgs) -> str:
@@ -411,73 +468,84 @@ def next_match_needing_result(ctx: FifaContext, _args: NoArgs) -> str:
 # Player handlers
 # --------------------------------------------------------------------------- #
 def register_player(ctx: FifaContext, args: RegisterPlayer) -> str:
-    """Register (or welcome back) a player by name."""
+    """Link the caller's session to a display name (creating the player)."""
     if not list(ctx.store.get("match")):
         return (
             "The match schedule isn't loaded yet. An admin needs to load the "
             "schedule first."
         )
-    player = ctx.store.get.player(name=args.name)
-    created = False
-    if not player:
-        player = memories.Player(name=args.name)
+    if not ctx.talker:
+        return "I can't identify your session, so I can't register you."
+    mine = _player_by_talker(ctx)
+    if mine:
+        return f"You're already registered as {mine.name}."
+    name = args.name.strip()
+    existing = ctx.store.get.player(name=name)
+    if existing:
+        if getattr(existing, "talker", ""):
+            return (
+                f"The name '{name}' is already taken by another session. If "
+                "that's you and you lost your session, ask the admin to relink it."
+            )
+        existing.talker = ctx.talker  # claim a previously unlinked record
+        ctx.store.put(existing)
+        player, verb = existing, "Welcome back,"
+    else:
+        player = memories.Player(name=name, talker=ctx.talker)
         ctx.store.put(player)
-        created = True
-    verb = "Registered" if created else "Welcome back,"
+        verb = "Registered"
     nxt = _next_open_match(ctx, player)
     if nxt:
-        return f"{verb} {args.name}. Next match to predict: {_describe(nxt)}."
-    return f"{verb} {args.name}. There are no upcoming matches to predict right now."
+        return f"{verb} {name}. Next match to predict: {_describe(nxt)}."
+    return f"{verb} {name}. There are no upcoming matches to predict right now."
 
 
-def get_next_match(ctx: FifaContext, args: PlayerRef) -> str:
-    """Return the next match awaiting the player's prediction, if any."""
-    player = ctx.store.get.player(name=args.player_name)
-    if not player:
-        return f"No player named '{args.player_name}'. Register first."
-    nxt = _next_open_match(ctx, player)
+def get_next_match(ctx: FifaContext, _args: NoArgs) -> str:
+    """Return the next match awaiting the caller's prediction, if any."""
+    me = _player_by_talker(ctx)
+    if not me:
+        return NEED_NAME
+    nxt = _next_open_match(ctx, me)
     if nxt:
-        return f"Next match awaiting {args.player_name}'s prediction: {_describe(nxt)}."
-    return f"{args.player_name} has no upcoming matches to predict right now."
+        return f"Next match awaiting your prediction: {_describe(nxt)}."
+    return "You have no upcoming matches to predict right now."
 
 
 def place_bet(ctx: FifaContext, args: PlaceBet) -> str:
-    """Record the player's predicted score for their next upcoming match."""
-    player = ctx.store.get.player(name=args.player_name)
-    if not player:
-        return f"No player named '{args.player_name}'. Register first."
-    match = _next_open_match(ctx, player)
+    """Record the caller's predicted score for their next upcoming match."""
+    me = _player_by_talker(ctx)
+    if not me:
+        return NEED_NAME
+    match = _next_open_match(ctx, me)
     if not match:
-        return (
-            f"{args.player_name} has no upcoming matches to predict right now."
-        )
-    _ensure_predictions(player)[str(match.number)] = [args.home_score, args.away_score]
-    ctx.store.put(player)
-    nxt = _next_open_match(ctx, player)
+        return "You have no upcoming matches to predict right now."
+    _ensure_predictions(me)[str(match.number)] = [args.home_score, args.away_score]
+    ctx.store.put(me)
+    nxt = _next_open_match(ctx, me)
     tail = f" Next match: {_describe(nxt)}." if nxt else " That was the last open match."
     return (
-        f"Recorded {args.player_name}'s prediction for {_label(match)}: "
+        f"Recorded your prediction for {_label(match)}: "
         f"{args.home_score}:{args.away_score}.{tail}"
     )
 
 
 def update_prediction(ctx: FifaContext, args: UpdatePrediction) -> str:
-    """Correct a player's prediction for a specific match that hasn't started."""
-    player = ctx.store.get.player(name=args.player_name)
-    if not player:
-        return f"No player named '{args.player_name}'. Register first."
+    """Correct the caller's prediction for a specific not-yet-started match."""
+    me = _player_by_talker(ctx)
+    if not me:
+        return NEED_NAME
     match = _find_match(ctx, args.home, args.away)
     if not match:
         return f"No match '{args.home} vs {args.away}' in the schedule."
     if _has_started(match):
         return (
             f"{_label(match)} has already kicked off, so its prediction is "
-            "locked. Only Juris can change it now."
+            "locked. Only the admin can change it now."
         )
-    _ensure_predictions(player)[str(match.number)] = [args.home_score, args.away_score]
-    ctx.store.put(player)
+    _ensure_predictions(me)[str(match.number)] = [args.home_score, args.away_score]
+    ctx.store.put(me)
     return (
-        f"Updated {args.player_name}'s prediction for {_label(match)} to "
+        f"Updated your prediction for {_label(match)} to "
         f"{args.home_score}:{args.away_score}."
     )
 
@@ -536,6 +604,13 @@ TOOLSPECS: list[ToolSpec] = [
         SetResult,
         set_result,
     ),
+    ToolSpec(
+        "relink_player",
+        "ADMIN: repoint a player's record to a new session id - use to recover "
+        "a player who lost their session/cookies (requires the admin secret).",
+        RelinkPlayer,
+        relink_player,
+    ),
     # lookups (read-only) - use these to report real state instead of guessing
     ToolSpec(
         "list_players",
@@ -545,9 +620,21 @@ TOOLSPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_predictions",
-        "List all of a player's saved predictions (their match picks).",
+        "List all of a named player's saved predictions (admin/overview).",
         PlayerRef,
         get_predictions,
+    ),
+    ToolSpec(
+        "my_predictions",
+        "List the current player's own saved predictions.",
+        NoArgs,
+        my_predictions,
+    ),
+    ToolSpec(
+        "whoami",
+        "Tell the current player their session id and registered name.",
+        NoArgs,
+        whoami,
     ),
     ToolSpec(
         "standings",
@@ -564,30 +651,31 @@ TOOLSPECS: list[ToolSpec] = [
         NoArgs,
         next_match_needing_result,
     ),
-    # player
+    # player (resolved by the caller's session; no name argument)
     ToolSpec(
         "register_player",
-        "Register a player by name so they can place predictions.",
+        "Register the current player under a display name so they can predict. "
+        "Call this when a tool reports it doesn't know who the player is.",
         RegisterPlayer,
         register_player,
     ),
     ToolSpec(
         "get_next_match",
-        "Get the next match awaiting a prediction from the given player.",
-        PlayerRef,
+        "Get the next match awaiting the current player's prediction.",
+        NoArgs,
         get_next_match,
     ),
     ToolSpec(
         "place_bet",
-        "Record a player's predicted score for their next upcoming match. "
-        "Refused once that match has kicked off.",
+        "Record the current player's predicted score for their next upcoming "
+        "match. Refused once that match has kicked off.",
         PlaceBet,
         place_bet,
     ),
     ToolSpec(
         "update_prediction",
-        "Correct a player's prediction for a specific match (by team names) that "
-        "has not kicked off yet.",
+        "Correct the current player's prediction for a specific match (by team "
+        "names) that has not kicked off yet.",
         UpdatePrediction,
         update_prediction,
     ),
