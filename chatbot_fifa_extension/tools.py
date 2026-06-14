@@ -481,6 +481,11 @@ def register_player(ctx: FifaContext, args: RegisterPlayer) -> str:
         return f"You're already registered as {mine.name}."
     name = args.name.strip()
     existing = ctx.store.get.player(name=name)
+    if not existing:  # case-insensitive match, so re-linking won't duplicate
+        for player in ctx.store.get("player"):
+            if player.name.lower() == name.lower():
+                existing = player
+                break
     if existing:
         if getattr(existing, "talker", ""):
             return (
@@ -496,8 +501,9 @@ def register_player(ctx: FifaContext, args: RegisterPlayer) -> str:
         verb = "Registered"
     nxt = _next_open_match(ctx, player)
     if nxt:
-        return f"{verb} {name}. Next match to predict: {_describe(nxt)}."
-    return f"{verb} {name}. There are no upcoming matches to predict right now."
+        return f"{verb} {player.name}. Next match to predict: {_describe(nxt)}."
+    return (f"{verb} {player.name}. There are no upcoming matches to predict "
+            "right now.")
 
 
 def get_next_match(ctx: FifaContext, _args: NoArgs) -> str:
