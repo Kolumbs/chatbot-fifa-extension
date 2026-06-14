@@ -308,6 +308,11 @@ def set_result(ctx: FifaContext, args: SetResult) -> str:
     match = _find_match(ctx, args.home, args.away)
     if not match:
         return f"No match '{args.home} vs {args.away}' in the schedule."
+    if not _has_started(match):
+        return (
+            f"{_label(match)} hasn't kicked off yet (scheduled {match.kickoff}), "
+            "so a result can't be recorded."
+        )
     match.result = [args.home_score, args.away_score]
     ctx.store.put(match)
     return (
