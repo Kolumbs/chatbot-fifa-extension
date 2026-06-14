@@ -110,12 +110,12 @@ class UpdatePrediction(pydantic.BaseModel):
     away_score: int = pydantic.Field(ge=0, description="Corrected away goals.")
 
 
-class RelinkPlayer(AdminAuth):
-    """Repoint a player's record to a new session id (cookie-clear recovery)."""
+class LinkDevice(AdminAuth):
+    """Approve an additional session/device for a player."""
 
-    name: str = pydantic.Field(description="Display name of the player to relink.")
+    name: str = pydantic.Field(description="Display name of the player.")
     talker: str = pydantic.Field(
-        description="The new session id (talker) to attach to that player."
+        description="The session id (talker) to add as an extra device for them."
     )
 
 
@@ -210,12 +210,24 @@ NEED_NAME = (
 )
 
 
+def _is_linked(player):
+    """True if any session is attached to the player (primary or extra device)."""
+    return bool(getattr(player, "talker", "")) or bool(getattr(player, "talkers", None))
+
+
 def _player_by_talker(ctx):
-    """Find the player linked to the current caller's talker, if any."""
+    """Find the player for the caller's talker.
+
+    Checks the primary ``talker`` first (the active session, usually right), then
+    the ``talkers`` fallback list (admin-approved extra devices).
+    """
     if not ctx.talker:
         return None
     for player in ctx.store.get("player"):
-        if getattr(player, "talker", "") == ctx.talker:
+        if ctx.talker == getattr(player, "talker", ""):
+            return player
+    for player in ctx.store.get("player"):
+        if ctx.talker in (getattr(player, "talkers", None) or []):
             return player
     return None
 
@@ -357,17 +369,26 @@ def set_result(ctx: FifaContext, args: SetResult) -> str:
     )
 
 
-def relink_player(ctx: FifaContext, args: RelinkPlayer) -> str:
-    """Repoint a player's record to a new session id (cookie-clear recovery)."""
+def link_device(ctx: FifaContext, args: LinkDevice) -> str:
+    """Approve an extra session/device for a player (added to the fallback list).
+
+    Also covers cookie-clear recovery: add the player's new session id.
+    """
     err = _require_admin(ctx, args.admin_secret)
     if err:
         return err
     player = ctx.store.get.player(name=args.name)
     if not player:
         return f"No player named '{args.name}'."
-    player.talker = args.talker.strip()
+    new = args.talker.strip()
+    if new == getattr(player, "talker", "") or new in (getattr(player, "talkers", None) or []):
+        return f"That session is already linked to {args.name}."
+    talkers = list(getattr(player, "talkers", None) or [])
+    talkers.append(new)
+    player.talkers = talkers
     ctx.store.put(player)
-    return f"Relinked {args.name} to session id {player.talker}."
+    sessions = (1 if getattr(player, "talker", "") else 0) + len(player.talkers)
+    return f"Added a device for {args.name} (now {sessions} session(s) linked)."
 
 
 # --------------------------------------------------------------------------- #
@@ -381,7 +402,9 @@ def list_players(ctx: FifaContext, _args: NoArgs) -> str:
     lines = []
     for player in players:
         preds = player.predictions if isinstance(player.predictions, dict) else {}
-        linked = "linked" if getattr(player, "talker", "") else "NOT linked"
+        sessions = (1 if getattr(player, "talker", "") else 0) + len(
+            getattr(player, "talkers", None) or [])
+        linked = f"{sessions} session(s)" if sessions else "NOT linked"
         lines.append(f"{player.name}: {len(preds)} prediction(s) ({linked})")
     return "\n".join(lines)
 
@@ -487,12 +510,14 @@ def register_player(ctx: FifaContext, args: RegisterPlayer) -> str:
                 existing = player
                 break
     if existing:
-        if getattr(existing, "talker", ""):
+        if _is_linked(existing):
             return (
-                f"The name '{name}' is already taken by another session. If "
-                "that's you and you lost your session, ask the admin to relink it."
+                f"The name '{existing.name}' is already in use. If this is a new "
+                "device of yours, ask the admin to add it - send them the id from "
+                "'whoami'. (The first device claims a name; extra devices need "
+                "admin approval.)"
             )
-        existing.talker = ctx.talker  # claim a previously unlinked record
+        existing.talker = ctx.talker  # first device claims a previously unlinked record
         ctx.store.put(existing)
         player, verb = existing, "Welcome back,"
     else:
@@ -611,11 +636,12 @@ TOOLSPECS: list[ToolSpec] = [
         set_result,
     ),
     ToolSpec(
-        "relink_player",
-        "ADMIN: repoint a player's record to a new session id - use to recover "
-        "a player who lost their session/cookies (requires the admin secret).",
-        RelinkPlayer,
-        relink_player,
+        "link_device",
+        "ADMIN: approve an extra session/device for a player (their first device "
+        "claims the name for free; additional devices and cookie-clear recovery "
+        "need this). Requires the admin secret.",
+        LinkDevice,
+        link_device,
     ),
     # lookups (read-only) - use these to report real state instead of guessing
     ToolSpec(

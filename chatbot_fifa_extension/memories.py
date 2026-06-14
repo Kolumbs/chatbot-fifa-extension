@@ -40,5 +40,6 @@ class Player:
     predictions maps str(match number) -> [home_goals, away_goals].
     """
     name: str = dataclasses.field(default=None, metadata={"key": True})
-    talker: str = ""
+    talker: str = ""  # legacy single-session field (kept so old links still match)
+    talkers: list = dataclasses.field(default_factory=list)  # linked session ids
     predictions: dict = dataclasses.field(default_factory=dict)
