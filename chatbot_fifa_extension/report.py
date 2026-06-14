@@ -6,7 +6,11 @@ Run it on the host (reads the live db path from your config; read-only):
 
     python -m chatbot_fifa_extension.report \
         --conf /home/juris/py-programs/kolumbs/conf.toml \
-        --pdf report.pdf --md report.md [--exclude Name1,Name2]
+        --pdf report.pdf --md report.md [--exclude Name1,Name2] [--from 7]
+
+--from N produces an "update" report: only matches from match #N onward are
+detailed, and each player's total is split into a black "Before" baseline
+(matches before #N) and a green "+Since #N" delta (matches from #N onward).
 
 For PDF output install reportlab once:  pip install reportlab
 (or install this package with the extra:  pip install -e ".[report]")
@@ -25,18 +29,22 @@ SCORING = (
     "on a match nobody predicted exactly, the closest correct prediction earns "
     "+2 (or +1 each if several tie)."
 )
+GREEN = "#1a7f37"
 
 
 def _preds(player):
     return player.predictions if isinstance(player.predictions, dict) else {}
 
 
-def compute(ctx, exclude=()):
-    """Return (ranking, match_rows) scored from the store.
+def compute(ctx, exclude=(), since=None):
+    """Score the store.
 
-    ranking: list of (name, points) sorted high-to-low.
-    match_rows: list of (match, [(name, pick, note, points), ...]) for each
-        played match that at least one (included) player predicted.
+    Returns (ranking, before, delta, match_rows):
+      ranking: player names sorted by grand total (before+delta), high to low.
+      before:  {name: points from matches before #since} (all points if no since).
+      delta:   {name: points from matches >= #since} (zeros if no since).
+      match_rows: [(match, [(name, pick, note, points), ...]), ...] for every
+        played+predicted match (the renderer filters by since for display).
     """
     exclude = set(exclude)
     players = [
@@ -44,7 +52,8 @@ def compute(ctx, exclude=()):
         if p.name not in exclude
     ]
     matches = sorted(ctx.store.get("match"), key=lambda m: m.number)
-    totals = {p.name: 0 for p in players}
+    before = {p.name: 0 for p in players}
+    delta = {p.name: 0 for p in players}
     match_rows = []
     for match in matches:
         if not match.result:
@@ -67,6 +76,7 @@ def compute(ctx, exclude=()):
         if cands:
             mind = min(d for _, d in cands)
             closest = [n for n, d in cands if d == mind]
+        is_since = since is not None and match.number >= since
         rows = []
         for player in players:
             pred, correct, diff = info[player.name]
@@ -84,29 +94,37 @@ def compute(ctx, exclude=()):
                     note += f" +{bonus} (closest)"
             else:
                 pts, note = 0, "wrong"
-            totals[player.name] += pts
+            (delta if is_since else before)[player.name] += pts
             rows.append((player.name, pick, note, pts))
         match_rows.append((match, rows))
-    ranking = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))
-    return ranking, match_rows
+    ranking = sorted(before, key=lambda n: (-(before[n] + delta[n]), n))
+    return ranking, before, delta, match_rows
 
 
-def to_markdown(ranking, match_rows):
+def to_markdown(ranking, before, delta, match_rows, since=None):
     """Render the report as Markdown text."""
     gen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    lines = [
-        "# FIFA World Cup 2026 - Prediction Pool Report",
-        f"_Generated {gen}_", "", f"**{SCORING}**", "",
-        "## Standings", "| # | Player | Points |", "|---|--------|-------:|",
-    ]
-    for i, (name, pts) in enumerate(ranking, 1):
-        lines.append(f"| {i} | {name} | {pts} |")
-    lines += ["", "## Match-by-match"]
+    lines = ["# FIFA World Cup 2026 - Prediction Pool Report",
+             f"_Generated {gen}_", "", f"**{SCORING}**", "", "## Standings"]
+    if since:
+        lines += [f"_Update from match #{since} onward (Since = new points)._", "",
+                  f"| # | Player | Before | +Since #{since} | Total |",
+                  "|---|--------|-------:|------------:|------:|"]
+        for i, n in enumerate(ranking, 1):
+            lines.append(
+                f"| {i} | {n} | {before[n]} | +{delta[n]} | {before[n] + delta[n]} |")
+    else:
+        lines += ["| # | Player | Points |", "|---|--------|-------:|"]
+        for i, n in enumerate(ranking, 1):
+            lines.append(f"| {i} | {n} | {before[n]} |")
+    heading = "## Match-by-match" + (f" (from #{since})" if since else "")
+    lines += ["", heading]
     for match, rows in match_rows:
+        if since and match.number < since:
+            continue
         lines.append(
             f"### #{match.number} {match.home} vs {match.away} - "
-            f"actual {match.result[0]}:{match.result[1]}"
-        )
+            f"actual {match.result[0]}:{match.result[1]}")
         lines += [f"_kickoff {match.kickoff}_", "",
                   "| Player | Pick | Scoring | Points |",
                   "|--------|------|---------|-------:|"]
@@ -116,7 +134,7 @@ def to_markdown(ranking, match_rows):
     return "\n".join(lines)
 
 
-def to_pdf(ranking, match_rows, path):
+def to_pdf(ranking, before, delta, match_rows, since, path):
     """Write the report as a styled PDF (requires reportlab)."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -127,18 +145,20 @@ def to_pdf(ranking, match_rows, path):
 
     styles = getSampleStyleSheet()
     gen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    head, sub = colors.HexColor("#1f4e79"), colors.HexColor("#2e6da4")
+    head, sub, green = (colors.HexColor("#1f4e79"), colors.HexColor("#2e6da4"),
+                        colors.HexColor(GREEN))
 
-    def styled(data, widths, colour):
+    def styled(data, widths, colour, extra=()):
         table = Table(data, colWidths=widths, hAlign="LEFT")
-        table.setStyle(TableStyle([
+        style = [
             ("BACKGROUND", (0, 0), (-1, 0), colour),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1),
              [colors.white, colors.HexColor("#eef3f8")]),
-        ]))
+        ]
+        table.setStyle(TableStyle(style + list(extra)))
         return table
 
     el = [
@@ -146,12 +166,26 @@ def to_pdf(ranking, match_rows, path):
         Paragraph(f"Generated {gen}", styles["Normal"]), Spacer(1, 0.3 * cm),
         Paragraph(SCORING, styles["Normal"]), Spacer(1, 0.4 * cm),
         Paragraph("Standings", styles["Heading2"]),
-        styled([["#", "Player", "Points"]] +
-               [[str(i), n, str(p)] for i, (n, p) in enumerate(ranking, 1)],
-               [1.2 * cm, 6 * cm, 2.5 * cm], head),
-        Spacer(1, 0.5 * cm), Paragraph("Match-by-match", styles["Heading2"]),
     ]
+    if since:
+        el.append(Paragraph(
+            f"Update from match #{since} onward — the "
+            f"<font color='{GREEN}'>Since</font> column shows new points.",
+            styles["Normal"]))
+        data = [["#", "Player", "Before", f"Since #{since}", "Total"]] + [
+            [str(i), n, str(before[n]), f"+{delta[n]}", str(before[n] + delta[n])]
+            for i, n in enumerate(ranking, 1)]
+        el.append(styled(data, [1 * cm, 5 * cm, 2 * cm, 2.4 * cm, 2 * cm], head,
+                         extra=[("TEXTCOLOR", (3, 1), (3, -1), green)]))
+    else:
+        data = [["#", "Player", "Points"]] + [
+            [str(i), n, str(before[n])] for i, n in enumerate(ranking, 1)]
+        el.append(styled(data, [1.2 * cm, 6 * cm, 2.5 * cm], head))
+    title = "Match-by-match" + (f" (from #{since})" if since else "")
+    el += [Spacer(1, 0.5 * cm), Paragraph(title, styles["Heading2"])]
     for match, rows in match_rows:
+        if since and match.number < since:
+            continue
         el.append(Spacer(1, 0.2 * cm))
         el.append(Paragraph(
             f"#{match.number} {match.home} vs {match.away} — "
@@ -171,8 +205,7 @@ def main(argv=None):
         description="Generate the FIFA prediction-pool report.")
     parser.add_argument(
         "--db", default=".",
-        help="Directory holding the membank 'db' file (default: current dir, "
-        "i.e. drop the refreshed db at the repo root and run from there).")
+        help="Directory holding the membank 'db' file (default: current dir).")
     parser.add_argument(
         "--conf", default=None,
         help="Read the database path from this conf.toml instead of --db.")
@@ -181,6 +214,10 @@ def main(argv=None):
     parser.add_argument("--md", default="report.md", help="Markdown output path.")
     parser.add_argument("--exclude", default="",
                         help="Comma-separated player names to leave out.")
+    parser.add_argument(
+        "--from", dest="since", type=int, default=None,
+        help="Update mode: detail only matches from this match number onward, "
+        "and split standings into Before (black) + Since (green).")
     args = parser.parse_args(argv)
 
     if args.conf:
@@ -190,21 +227,23 @@ def main(argv=None):
         database_path = args.db
     ctx = build_context({"database_path": database_path})
     exclude = [x.strip() for x in args.exclude.split(",") if x.strip()]
-    ranking, match_rows = compute(ctx, exclude)
+    ranking, before, delta, match_rows = compute(ctx, exclude, args.since)
 
     if args.md:
         with open(args.md, "w", encoding="utf-8") as handle:
-            handle.write(to_markdown(ranking, match_rows))
+            handle.write(to_markdown(ranking, before, delta, match_rows, args.since))
         print(f"Wrote {args.md}")
     try:
-        to_pdf(ranking, match_rows, args.pdf)
+        to_pdf(ranking, before, delta, match_rows, args.since, args.pdf)
         print(f"Wrote {args.pdf}")
     except ImportError:
         print("reportlab not installed - PDF skipped. Install: pip install reportlab")
 
     print("\nStandings:")
-    for i, (name, pts) in enumerate(ranking, 1):
-        print(f"  {i}. {name} - {pts}")
+    for i, n in enumerate(ranking, 1):
+        total = before[n] + delta[n]
+        extra = f"  (before {before[n]} + since {delta[n]})" if args.since else ""
+        print(f"  {i}. {n} - {total}{extra}")
 
 
 if __name__ == "__main__":
