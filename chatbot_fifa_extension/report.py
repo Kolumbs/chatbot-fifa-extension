@@ -232,11 +232,11 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
             return str(total)
         data = [["#", "Player", "Total"]] + [
             [str(i), n, total_cell(n)] for i, n in enumerate(ranking, 1)]
-        el.append(styled(data, [1.5 * cm, 13 * cm, 5 * cm], head))
+        el.append(styled(data, [1.2 * cm, 8.6 * cm, 4 * cm], head))
     else:
         data = [["#", "Player", "Points"]] + [
             [str(i), n, str(before[n])] for i, n in enumerate(ranking, 1)]
-        el.append(styled(data, [1.5 * cm, 13 * cm, 5 * cm], head))
+        el.append(styled(data, [1.2 * cm, 8.6 * cm, 4 * cm], head))
     title = "Match-by-match" + (f" (from #{since})" if since else "")
     el += [Spacer(1, 0.5 * cm), Paragraph(title, styles["Heading2"])]
     for match, rows in match_rows:
@@ -250,7 +250,7 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
             styles["Heading4"]))
         el.append(styled([["Player", "Pick", "Scoring", "Pts"]] +
                          [[n, pk, nt, str(pt)] for n, pk, nt, pt in rows],
-                         [4.5 * cm, 2.5 * cm, 10.5 * cm, 2 * cm], sub))
+                         [3.5 * cm, 2 * cm, 6.5 * cm, 1.8 * cm], sub))
     if upcoming_rows:
         amber = colors.HexColor("#9c6500")
         el += [Spacer(1, 0.5 * cm),
@@ -263,10 +263,10 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
                 f"<font size=9 color=grey>(kickoff {_fmt_kickoff(match, tz)})</font>",
                 styles["Heading4"]))
             el.append(styled([["Player", "Pick"]] + [[n, pk] for n, pk in picks],
-                             [13 * cm, 6 * cm], amber))
-    SimpleDocTemplate(path, pagesize=A4,
-                      leftMargin=0.7 * cm, rightMargin=0.7 * cm,
-                      topMargin=0.7 * cm, bottomMargin=0.7 * cm,
+                             [9.2 * cm, 4.6 * cm], amber))
+    SimpleDocTemplate(path, pagesize=(15 * cm, A4[1]),
+                      leftMargin=0.6 * cm, rightMargin=0.6 * cm,
+                      topMargin=0.6 * cm, bottomMargin=0.6 * cm,
                       title="WC2026 Prediction Pool Report").build(el)
 
 
