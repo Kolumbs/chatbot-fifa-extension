@@ -53,7 +53,7 @@ def _fmt_kickoff(match, tz=timezone.utc):
     return moment.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z")
 
 
-def upcoming(ctx, exclude=(), hours=24):
+def upcoming(ctx, exclude=(), hours=36):
     """Preview matches without a final result yet, up to `hours` ahead.
 
     Includes any match that has no result and kicks off before the horizon -
@@ -148,7 +148,7 @@ def compute(ctx, exclude=(), since=None):
 
 
 def to_markdown(ranking, before, delta, match_rows, since=None,
-                upcoming_rows=(), hours=24, tz=timezone.utc):
+                upcoming_rows=(), hours=36, tz=timezone.utc):
     """Render the report as Markdown text."""
     gen = datetime.now(tz).strftime("%Y-%m-%d %H:%M %Z")
     lines = ["# FIFA World Cup 2026 - Prediction Pool Report",
@@ -190,7 +190,7 @@ def to_markdown(ranking, before, delta, match_rows, since=None,
 
 
 def to_pdf(ranking, before, delta, match_rows, since, path,
-           upcoming_rows=(), hours=24, tz=timezone.utc):
+           upcoming_rows=(), hours=36, tz=timezone.utc):
     """Write the report as a styled PDF (requires reportlab)."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -292,9 +292,9 @@ def main(argv=None):
         help="Update mode: detail only matches from this match number onward, "
         "and split standings into Before (black) + Since (green).")
     parser.add_argument(
-        "--upcoming", type=int, default=24,
+        "--upcoming", type=int, default=36,
         help="Hours ahead to preview not-yet-played matches' predictions "
-        "(default 24; 0 to disable).")
+        "(default 36; 0 to disable).")
     args = parser.parse_args(argv)
 
     tz = timezone.utc
