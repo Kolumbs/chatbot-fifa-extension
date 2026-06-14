@@ -170,18 +170,25 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Generate the FIFA prediction-pool report.")
     parser.add_argument(
-        "--conf", default="/home/juris/py-programs/kolumbs/conf.toml",
-        help="Path to the zoozl conf.toml (for the database path).")
+        "--db", default=".",
+        help="Directory holding the membank 'db' file (default: current dir, "
+        "i.e. drop the refreshed db at the repo root and run from there).")
+    parser.add_argument(
+        "--conf", default=None,
+        help="Read the database path from this conf.toml instead of --db.")
     parser.add_argument("--pdf", default="report.pdf",
                         help="Output PDF path (skipped if reportlab missing).")
-    parser.add_argument("--md", default=None, help="Optional Markdown output path.")
+    parser.add_argument("--md", default="report.md", help="Markdown output path.")
     parser.add_argument("--exclude", default="",
                         help="Comma-separated player names to leave out.")
     args = parser.parse_args(argv)
 
-    with open(args.conf, "rb") as handle:
-        conf = tomllib.load(handle)
-    ctx = build_context(conf["chatbot_fifa_extension"])
+    if args.conf:
+        with open(args.conf, "rb") as handle:
+            database_path = tomllib.load(handle)["chatbot_fifa_extension"]["database_path"]
+    else:
+        database_path = args.db
+    ctx = build_context({"database_path": database_path})
     exclude = [x.strip() for x in args.exclude.split(",") if x.strip()]
     ranking, match_rows = compute(ctx, exclude)
 

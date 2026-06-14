@@ -1,4 +1,10 @@
 upload.sh
+
+# Local report data/outputs (place the refreshed membank db here as ./db)
+/db
+/report.pdf
+/report.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
