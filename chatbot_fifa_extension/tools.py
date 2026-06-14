@@ -394,6 +394,14 @@ def standings(ctx: FifaContext, _args: NoArgs) -> str:
     )
 
 
+def next_match_needing_result(ctx: FifaContext, _args: NoArgs) -> str:
+    """Return the next already-kicked-off match that has no result entered."""
+    for match in _ordered_matches(ctx):
+        if _has_started(match) and not match.result:
+            return f"Next match needing a result: {_describe(match)}."
+    return "Every match that has kicked off already has a result entered."
+
+
 # --------------------------------------------------------------------------- #
 # Player handlers
 # --------------------------------------------------------------------------- #
@@ -542,6 +550,14 @@ TOOLSPECS: list[ToolSpec] = [
         "entered match results.",
         NoArgs,
         standings,
+    ),
+    ToolSpec(
+        "next_match_needing_result",
+        "Get the next already-played match that still needs its actual result "
+        "entered. Use this when recording results - NOT get_next_match, which is "
+        "for players' predictions.",
+        NoArgs,
+        next_match_needing_result,
     ),
     # player
     ToolSpec(
