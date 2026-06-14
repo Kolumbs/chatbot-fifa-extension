@@ -149,7 +149,7 @@ def compute(ctx, exclude=(), since=None):
 def to_markdown(ranking, before, delta, match_rows, since=None,
                 upcoming_rows=(), hours=24, tz=timezone.utc):
     """Render the report as Markdown text."""
-    gen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    gen = datetime.now(tz).strftime("%Y-%m-%d %H:%M %Z")
     lines = ["# FIFA World Cup 2026 - Prediction Pool Report",
              f"_Generated {gen}_", "", f"**{SCORING}**", "", "## Standings"]
     if since:
@@ -198,7 +198,7 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
 
     styles = getSampleStyleSheet()
     cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=11)
-    gen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    gen = datetime.now(tz).strftime("%Y-%m-%d %H:%M %Z")
     head, sub = colors.HexColor("#1f4e79"), colors.HexColor("#2e6da4")
 
     def styled(data, widths, colour, extra=()):
