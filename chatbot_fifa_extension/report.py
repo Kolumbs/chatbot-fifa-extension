@@ -155,7 +155,9 @@ def to_markdown(ranking, before, delta, match_rows, since=None,
     if since:
         lines += ["| # | Player | Total |", "|---|--------|------:|"]
         for i, n in enumerate(ranking, 1):
-            lines.append(f"| {i} | {n} | {before[n] + delta[n]} +{delta[n]} |")
+            total = before[n] + delta[n]
+            cell = f"{total} +{delta[n]}" if delta[n] else f"{total}"
+            lines.append(f"| {i} | {n} | {cell} |")
     else:
         lines += ["| # | Player | Points |", "|---|--------|-------:|"]
         for i, n in enumerate(ranking, 1):
@@ -221,11 +223,14 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
         Paragraph("Standings", styles["Heading2"]),
     ]
     if since:
+        def total_cell(n):
+            total = before[n] + delta[n]
+            if delta[n]:
+                return Paragraph(
+                    f"{total} <font color='{GREEN}'>+{delta[n]}</font>", cell)
+            return str(total)
         data = [["#", "Player", "Total"]] + [
-            [str(i), n, Paragraph(
-                f"{before[n] + delta[n]} <font color='{GREEN}'>+{delta[n]}</font>",
-                cell)]
-            for i, n in enumerate(ranking, 1)]
+            [str(i), n, total_cell(n)] for i, n in enumerate(ranking, 1)]
         el.append(styled(data, [1.2 * cm, 6 * cm, 3 * cm], head))
     else:
         data = [["#", "Player", "Points"]] + [
