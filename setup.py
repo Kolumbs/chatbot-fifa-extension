@@ -22,5 +22,8 @@ with open("README.md", "r", encoding="utf-8") as fh:
             "membank>=0.4.1",
             "pydantic>=2",
         ],
+        extras_require={
+            "report": ["reportlab>=4"],
+        },
         python_requires=">=3.10",
     )
