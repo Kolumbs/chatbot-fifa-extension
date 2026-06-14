@@ -19,6 +19,7 @@ For PDF output install reportlab once:  pip install reportlab
 import argparse
 import tomllib
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from . import fifa
 from .context import build_context
@@ -42,6 +43,14 @@ def _kickoff(match):
     except (ValueError, TypeError):
         return None
     return moment.replace(tzinfo=timezone.utc) if moment.tzinfo is None else moment
+
+
+def _fmt_kickoff(match, tz=timezone.utc):
+    """Format a match kickoff in the given timezone for display."""
+    moment = _kickoff(match)
+    if moment is None:
+        return match.kickoff
+    return moment.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z")
 
 
 def upcoming(ctx, exclude=(), hours=24):
@@ -138,7 +147,7 @@ def compute(ctx, exclude=(), since=None):
 
 
 def to_markdown(ranking, before, delta, match_rows, since=None,
-                upcoming_rows=(), hours=24):
+                upcoming_rows=(), hours=24, tz=timezone.utc):
     """Render the report as Markdown text."""
     gen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = ["# FIFA World Cup 2026 - Prediction Pool Report",
@@ -159,7 +168,7 @@ def to_markdown(ranking, before, delta, match_rows, since=None,
         lines.append(
             f"### #{match.number} {match.home} vs {match.away} - "
             f"actual {match.result[0]}:{match.result[1]}")
-        lines += [f"_kickoff {match.kickoff}_", "",
+        lines += [f"_kickoff {_fmt_kickoff(match, tz)}_", "",
                   "| Player | Pick | Scoring | Points |",
                   "|--------|------|---------|-------:|"]
         for name, pick, note, pts in rows:
@@ -169,7 +178,7 @@ def to_markdown(ranking, before, delta, match_rows, since=None,
         lines += ["", f"## Upcoming (next {hours}h) - predictions preview"]
         for match, picks in upcoming_rows:
             lines.append(f"### #{match.number} {match.home} vs {match.away}")
-            lines += [f"_kickoff {match.kickoff}_", "", "| Player | Pick |",
+            lines += [f"_kickoff {_fmt_kickoff(match, tz)}_", "", "| Player | Pick |",
                       "|--------|------|"]
             for name, pick in picks:
                 lines.append(f"| {name} | {pick} |")
@@ -178,7 +187,7 @@ def to_markdown(ranking, before, delta, match_rows, since=None,
 
 
 def to_pdf(ranking, before, delta, match_rows, since, path,
-           upcoming_rows=(), hours=24):
+           upcoming_rows=(), hours=24, tz=timezone.utc):
     """Write the report as a styled PDF (requires reportlab)."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -231,7 +240,7 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
         el.append(Paragraph(
             f"#{match.number} {match.home} vs {match.away} — "
             f"actual {match.result[0]}:{match.result[1]} "
-            f"<font size=8 color=grey>({match.kickoff})</font>",
+            f"<font size=8 color=grey>({_fmt_kickoff(match, tz)})</font>",
             styles["Heading4"]))
         el.append(styled([["Player", "Pick", "Scoring", "Pts"]] +
                          [[n, pk, nt, str(pt)] for n, pk, nt, pt in rows],
@@ -245,7 +254,7 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
             el.append(Spacer(1, 0.2 * cm))
             el.append(Paragraph(
                 f"#{match.number} {match.home} vs {match.away} "
-                f"<font size=8 color=grey>(kickoff {match.kickoff})</font>",
+                f"<font size=8 color=grey>(kickoff {_fmt_kickoff(match, tz)})</font>",
                 styles["Heading4"]))
             el.append(styled([["Player", "Pick"]] + [[n, pk] for n, pk in picks],
                              [6 * cm, 3 * cm], amber))
@@ -265,7 +274,11 @@ def main(argv=None):
         help="Read the database path from this conf.toml instead of --db.")
     parser.add_argument("--pdf", default="report.pdf",
                         help="Output PDF path (skipped if reportlab missing).")
-    parser.add_argument("--md", default="report.md", help="Markdown output path.")
+    parser.add_argument("--md", default=None,
+                        help="Optional Markdown output path (off by default).")
+    parser.add_argument("--tz", default=None,
+                        help="Timezone for displayed kickoff times, e.g. "
+                        "Europe/Riga (default UTC).")
     parser.add_argument("--exclude", default="",
                         help="Comma-separated player names to leave out.")
     parser.add_argument(
@@ -277,6 +290,13 @@ def main(argv=None):
         help="Hours ahead to preview not-yet-played matches' predictions "
         "(default 24; 0 to disable).")
     args = parser.parse_args(argv)
+
+    tz = timezone.utc
+    if args.tz:
+        try:
+            tz = ZoneInfo(args.tz)
+        except Exception:
+            print(f"Unknown timezone '{args.tz}', using UTC.")
 
     if args.conf:
         with open(args.conf, "rb") as handle:
@@ -291,11 +311,11 @@ def main(argv=None):
     if args.md:
         with open(args.md, "w", encoding="utf-8") as handle:
             handle.write(to_markdown(ranking, before, delta, match_rows,
-                                     args.since, upcoming_rows, args.upcoming))
+                                     args.since, upcoming_rows, args.upcoming, tz))
         print(f"Wrote {args.md}")
     try:
         to_pdf(ranking, before, delta, match_rows, args.since, args.pdf,
-               upcoming_rows, args.upcoming)
+               upcoming_rows, args.upcoming, tz)
         print(f"Wrote {args.pdf}")
     except ImportError:
         print("reportlab not installed - PDF skipped. Install: pip install reportlab")

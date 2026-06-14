@@ -23,7 +23,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
             "pydantic>=2",
         ],
         extras_require={
-            "report": ["reportlab>=4"],
+            "report": ["reportlab>=4", "tzdata"],
         },
         python_requires=">=3.10",
     )
