@@ -151,7 +151,7 @@ def to_markdown(ranking, before, delta, match_rows, since=None,
                 upcoming_rows=(), hours=36, tz=timezone.utc):
     """Render the report as Markdown text."""
     gen = datetime.now(tz).strftime("%Y-%m-%d %H:%M %Z")
-    lines = ["# FIFA World Cup 2026 - Prediction Pool Report",
+    lines = ["# World Cup 2026 — Predictions",
              f"_Generated {gen}_", "", f"**{SCORING}**", "", "## Standings"]
     if since:
         lines += ["| # | Player | Total |", "|---|--------|------:|"]
@@ -218,7 +218,7 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
         return table
 
     el = [
-        Paragraph("FIFA World Cup 2026 — Prediction Pool Report", styles["Title"]),
+        Paragraph("World Cup 2026 — Predictions", styles["Title"]),
         Paragraph(f"Generated {gen}", styles["Normal"]), Spacer(1, 0.3 * cm),
         Paragraph(SCORING, styles["Normal"]), Spacer(1, 0.4 * cm),
         Paragraph("Standings", styles["Heading2"]),
@@ -267,7 +267,7 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
     SimpleDocTemplate(path, pagesize=(15 * cm, A4[1]),
                       leftMargin=0.6 * cm, rightMargin=0.6 * cm,
                       topMargin=0.6 * cm, bottomMargin=0.6 * cm,
-                      title="WC2026 Prediction Pool Report").build(el)
+                      title="World Cup 2026 — Predictions").build(el)
 
 
 def main(argv=None):
