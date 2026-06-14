@@ -67,6 +67,15 @@ class AdminSetPrediction(AdminAuth):
     away_score: int = pydantic.Field(ge=0, description="Predicted away goals.")
 
 
+class SetResult(AdminAuth):
+    """Admin entry of a match's actual final score."""
+
+    home: str = pydantic.Field(description="Home team of the match (as scheduled).")
+    away: str = pydantic.Field(description="Away team of the match (as scheduled).")
+    home_score: int = pydantic.Field(ge=0, description="Actual home goals.")
+    away_score: int = pydantic.Field(ge=0, description="Actual away goals.")
+
+
 class ContestRef(pydantic.BaseModel):
     """Reference to a contest by its code."""
 
@@ -304,6 +313,22 @@ def admin_set_prediction(ctx: FifaContext, args: AdminSetPrediction) -> str:
     )
 
 
+def set_result(ctx: FifaContext, args: SetResult) -> str:
+    """Record the actual final score of a match."""
+    err = _require_admin(ctx, args.admin_secret)
+    if err:
+        return err
+    match = _find_match(ctx, args.home, args.away)
+    if not match:
+        return f"No match '{args.home} vs {args.away}' in the schedule."
+    match.result = [args.home_score, args.away_score]
+    ctx.store.put(match)
+    return (
+        f"Recorded result for {_label(match)}: "
+        f"{args.home_score}:{args.away_score}."
+    )
+
+
 def delete_contest(ctx: FifaContext, args: DeleteContest) -> str:
     """Delete a contest (does not delete the players themselves)."""
     err = _require_admin(ctx, args.admin_secret)
@@ -510,6 +535,13 @@ TOOLSPECS: list[ToolSpec] = [
         "even after kickoff (requires the admin secret).",
         AdminSetPrediction,
         admin_set_prediction,
+    ),
+    ToolSpec(
+        "set_result",
+        "ADMIN: record the actual final score of a match once it has been "
+        "played (requires the admin secret).",
+        SetResult,
+        set_result,
     ),
     ToolSpec(
         "delete_contest",
