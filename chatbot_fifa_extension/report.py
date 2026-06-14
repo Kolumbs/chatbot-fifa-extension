@@ -54,24 +54,25 @@ def _fmt_kickoff(match, tz=timezone.utc):
 
 
 def upcoming(ctx, exclude=(), hours=24):
-    """Preview not-yet-played matches kicking off within the next `hours`.
+    """Preview matches without a final result yet, up to `hours` ahead.
 
-    Returns [(match, [(name, pick), ...]), ...] so players can see everyone's
-    predictions ahead of those matches. No scoring (results aren't in yet).
+    Includes any match that has no result and kicks off before the horizon -
+    so already-started matches still awaiting their result are not missed, as
+    well as not-yet-played matches within the window. Returns
+    [(match, [(name, pick), ...]), ...]. No scoring (results aren't in yet).
     """
     exclude = set(exclude)
     players = [
         p for p in sorted(ctx.store.get("player"), key=lambda p: p.name)
         if p.name not in exclude
     ]
-    now = datetime.now(timezone.utc)
-    horizon = now + timedelta(hours=hours)
+    horizon = datetime.now(timezone.utc) + timedelta(hours=hours)
     rows = []
     for match in sorted(ctx.store.get("match"), key=lambda m: m.number):
         if match.result:
             continue
         moment = _kickoff(match)
-        if moment is None or not (now <= moment < horizon):
+        if moment is None or moment >= horizon:
             continue
         picks = []
         for player in players:
@@ -177,7 +178,7 @@ def to_markdown(ranking, before, delta, match_rows, since=None,
             lines.append(f"| {name} | {pick} | {note} | {pts} |")
         lines.append("")
     if upcoming_rows:
-        lines += ["", f"## Upcoming (next {hours}h) - predictions preview"]
+        lines += ["", "## Pending & upcoming - predictions preview"]
         for match, picks in upcoming_rows:
             lines.append(f"### #{match.number} {match.home} vs {match.away}")
             lines += [f"_kickoff {_fmt_kickoff(match, tz)}_", "", "| Player | Pick |",
@@ -253,7 +254,7 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
     if upcoming_rows:
         amber = colors.HexColor("#9c6500")
         el += [Spacer(1, 0.5 * cm),
-               Paragraph(f"Upcoming (next {hours}h) — predictions preview",
+               Paragraph("Pending & upcoming — predictions preview",
                          styles["Heading2"])]
         for match, picks in upcoming_rows:
             el.append(Spacer(1, 0.2 * cm))
