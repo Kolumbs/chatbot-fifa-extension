@@ -200,7 +200,7 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
     styles = getSampleStyleSheet()
-    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=11)
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=11, leading=13)
     gen = datetime.now(tz).strftime("%Y-%m-%d %H:%M %Z")
     head, sub = colors.HexColor("#1f4e79"), colors.HexColor("#2e6da4")
 
@@ -209,7 +209,7 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
         style = [
             ("BACKGROUND", (0, 0), (-1, 0), colour),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("FONTSIZE", (0, 0), (-1, -1), 11),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1),
              [colors.white, colors.HexColor("#eef3f8")]),
@@ -232,11 +232,11 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
             return str(total)
         data = [["#", "Player", "Total"]] + [
             [str(i), n, total_cell(n)] for i, n in enumerate(ranking, 1)]
-        el.append(styled(data, [1.2 * cm, 6 * cm, 3 * cm], head))
+        el.append(styled(data, [1.5 * cm, 13 * cm, 5 * cm], head))
     else:
         data = [["#", "Player", "Points"]] + [
             [str(i), n, str(before[n])] for i, n in enumerate(ranking, 1)]
-        el.append(styled(data, [1.2 * cm, 6 * cm, 2.5 * cm], head))
+        el.append(styled(data, [1.5 * cm, 13 * cm, 5 * cm], head))
     title = "Match-by-match" + (f" (from #{since})" if since else "")
     el += [Spacer(1, 0.5 * cm), Paragraph(title, styles["Heading2"])]
     for match, rows in match_rows:
@@ -246,11 +246,11 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
         el.append(Paragraph(
             f"#{match.number} {match.home} vs {match.away} — "
             f"actual {match.result[0]}:{match.result[1]} "
-            f"<font size=8 color=grey>({_fmt_kickoff(match, tz)})</font>",
+            f"<font size=9 color=grey>({_fmt_kickoff(match, tz)})</font>",
             styles["Heading4"]))
         el.append(styled([["Player", "Pick", "Scoring", "Pts"]] +
                          [[n, pk, nt, str(pt)] for n, pk, nt, pt in rows],
-                         [4 * cm, 2 * cm, 7 * cm, 1.3 * cm], sub))
+                         [4.5 * cm, 2.5 * cm, 10.5 * cm, 2 * cm], sub))
     if upcoming_rows:
         amber = colors.HexColor("#9c6500")
         el += [Spacer(1, 0.5 * cm),
@@ -260,11 +260,13 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
             el.append(Spacer(1, 0.2 * cm))
             el.append(Paragraph(
                 f"#{match.number} {match.home} vs {match.away} "
-                f"<font size=8 color=grey>(kickoff {_fmt_kickoff(match, tz)})</font>",
+                f"<font size=9 color=grey>(kickoff {_fmt_kickoff(match, tz)})</font>",
                 styles["Heading4"]))
             el.append(styled([["Player", "Pick"]] + [[n, pk] for n, pk in picks],
-                             [6 * cm, 3 * cm], amber))
+                             [13 * cm, 6 * cm], amber))
     SimpleDocTemplate(path, pagesize=A4,
+                      leftMargin=0.7 * cm, rightMargin=0.7 * cm,
+                      topMargin=0.7 * cm, bottomMargin=0.7 * cm,
                       title="WC2026 Prediction Pool Report").build(el)
 
 
