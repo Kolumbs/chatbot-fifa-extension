@@ -144,12 +144,9 @@ def to_markdown(ranking, before, delta, match_rows, since=None,
     lines = ["# FIFA World Cup 2026 - Prediction Pool Report",
              f"_Generated {gen}_", "", f"**{SCORING}**", "", "## Standings"]
     if since:
-        lines += [f"_Update from match #{since} onward (Since = new points)._", "",
-                  f"| # | Player | Before | +Since #{since} | Total |",
-                  "|---|--------|-------:|------------:|------:|"]
+        lines += ["| # | Player | Total |", "|---|--------|------:|"]
         for i, n in enumerate(ranking, 1):
-            lines.append(
-                f"| {i} | {n} | {before[n]} | +{delta[n]} | {before[n] + delta[n]} |")
+            lines.append(f"| {i} | {n} | {before[n] + delta[n]} +{delta[n]} |")
     else:
         lines += ["| # | Player | Points |", "|---|--------|-------:|"]
         for i, n in enumerate(ranking, 1):
@@ -188,12 +185,12 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
     from reportlab.lib.units import cm
     from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
                                     TableStyle)
-    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
     styles = getSampleStyleSheet()
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=9, leading=11)
     gen = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    head, sub, green = (colors.HexColor("#1f4e79"), colors.HexColor("#2e6da4"),
-                        colors.HexColor(GREEN))
+    head, sub = colors.HexColor("#1f4e79"), colors.HexColor("#2e6da4")
 
     def styled(data, widths, colour, extra=()):
         table = Table(data, colWidths=widths, hAlign="LEFT")
@@ -215,15 +212,12 @@ def to_pdf(ranking, before, delta, match_rows, since, path,
         Paragraph("Standings", styles["Heading2"]),
     ]
     if since:
-        el.append(Paragraph(
-            f"Update from match #{since} onward — the "
-            f"<font color='{GREEN}'>Since</font> column shows new points.",
-            styles["Normal"]))
-        data = [["#", "Player", "Before", f"Since #{since}", "Total"]] + [
-            [str(i), n, str(before[n]), f"+{delta[n]}", str(before[n] + delta[n])]
+        data = [["#", "Player", "Total"]] + [
+            [str(i), n, Paragraph(
+                f"{before[n] + delta[n]} <font color='{GREEN}'>+{delta[n]}</font>",
+                cell)]
             for i, n in enumerate(ranking, 1)]
-        el.append(styled(data, [1 * cm, 5 * cm, 2 * cm, 2.4 * cm, 2 * cm], head,
-                         extra=[("TEXTCOLOR", (3, 1), (3, -1), green)]))
+        el.append(styled(data, [1.2 * cm, 6 * cm, 3 * cm], head))
     else:
         data = [["#", "Player", "Points"]] + [
             [str(i), n, str(before[n])] for i, n in enumerate(ranking, 1)]
