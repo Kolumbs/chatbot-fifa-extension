@@ -24,7 +24,7 @@ from typing import Callable
 
 import pydantic
 
-from . import memories
+from . import fifa, memories
 from .context import FifaContext
 
 
@@ -389,6 +389,55 @@ def get_predictions(ctx: FifaContext, args: PlayerRef) -> str:
     return f"{args.player_name}'s predictions:\n" + "\n".join(lines)
 
 
+def standings(ctx: FifaContext, args: ContestRef) -> str:
+    """Score a contest's players against entered results and rank them.
+
+    Scoring (the original scheme): 6 points for an exact score, 3 for the
+    correct outcome; on a match nobody predicted exactly, the closest correct
+    prediction (by goal difference) earns +2, or +1 each if several tie.
+    """
+    contest = ctx.store.get.contest(code=args.code)
+    if not contest:
+        return f"No contest '{args.code}'."
+    players = [ctx.store.get.player(name=n) for n in contest.players]
+    players = [p for p in players if p]
+    if not players:
+        return f"Contest '{args.code}' has no players yet."
+    scores = {p.name: 0 for p in players}
+    played = [m for m in _ordered_matches(ctx) if m.result]
+    if not played:
+        return "No match results have been entered yet."
+    for match in played:
+        perfect = False
+        closest = []
+        closest_diff = None
+        for player in players:
+            preds = player.predictions if isinstance(player.predictions, dict) else {}
+            prediction = preds.get(str(match.number))
+            if not prediction:
+                continue
+            correct, diff = fifa.get_score_bet(match.result, prediction)
+            if correct and diff == 0:
+                perfect = True
+                scores[player.name] += 6
+            elif correct:
+                scores[player.name] += 3
+                if closest_diff is None or diff < closest_diff:
+                    closest, closest_diff = [player.name], diff
+                elif diff == closest_diff:
+                    closest.append(player.name)
+        if not perfect and closest:
+            bonus = 2 if len(closest) == 1 else 1
+            for name in closest:
+                scores[name] += bonus
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    lines = [f"{i + 1}. {name} - {pts} pts" for i, (name, pts) in enumerate(ranked)]
+    return (
+        f"Standings for '{args.code}' (after {len(played)} played match(es)):\n"
+        + "\n".join(lines)
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Player handlers
 # --------------------------------------------------------------------------- #
@@ -567,6 +616,13 @@ TOOLSPECS: list[ToolSpec] = [
         "List all of a player's saved predictions (their match picks).",
         PlayerRef,
         get_predictions,
+    ),
+    ToolSpec(
+        "standings",
+        "Show the scoreboard for a contest, scoring players' predictions against "
+        "the entered match results.",
+        ContestRef,
+        standings,
     ),
     # player
     ToolSpec(
