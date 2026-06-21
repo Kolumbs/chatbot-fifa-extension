@@ -30,6 +30,17 @@ class Match:
 
 
 @dataclasses.dataclass()
+class Admin:
+    """A session/device that has authenticated as a tournament administrator.
+
+    talker is the caller's session identity (the same id players are resolved
+    by). Once recorded, admin-gated tools authorize this talker without the
+    secret being re-supplied, so it survives the conversation history window.
+    """
+    talker: str = dataclasses.field(default=None, metadata={"key": True})
+
+
+@dataclasses.dataclass()
 class Player:
     """A player and their per-match score predictions.
 

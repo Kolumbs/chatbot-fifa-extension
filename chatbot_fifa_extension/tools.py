@@ -44,7 +44,11 @@ class AdminAuth(pydantic.BaseModel):
     """Base for administrative operations requiring the admin secret."""
 
     admin_secret: str = pydantic.Field(
-        description="The admin secret that authorizes tournament management."
+        default="",
+        description=(
+            "Admin secret. Only needed the first time; once a session has "
+            "authenticated it stays admin, so leave this empty on later calls."
+        ),
     )
 
 
@@ -250,21 +254,43 @@ def _format_predictions(ctx, player):
 # --------------------------------------------------------------------------- #
 # Admin: auth + setup
 # --------------------------------------------------------------------------- #
+def _is_admin_talker(ctx):
+    """True if the caller's session has been recorded as an administrator."""
+    return bool(ctx.talker and ctx.store.get.admin(talker=ctx.talker))
+
+
+def _remember_admin(ctx):
+    """Persist the caller's session as an administrator (idempotent)."""
+    if ctx.talker and not ctx.store.get.admin(talker=ctx.talker):
+        ctx.store.put(memories.Admin(talker=ctx.talker))
+
+
 def _require_admin(ctx, token):
-    """Return an error string if the admin secret is missing/wrong, else None."""
+    """Authorize the caller for admin actions, else return an error string.
+
+    A session is authorized either because it was already recorded as admin
+    (so the secret never has to be re-supplied) or because it provides the
+    correct secret now - in which case the session is remembered as admin.
+    """
     if not ctx.admin_secret:
         return "Admin features are not configured on this bot."
-    if token != ctx.admin_secret:
-        return "Not authorized: the admin secret is incorrect."
-    return None
+    if _is_admin_talker(ctx):
+        return None
+    if token and token == ctx.admin_secret:
+        _remember_admin(ctx)
+        return None
+    return (
+        "You're not authorized for admin actions yet. Provide the admin secret "
+        "once and I'll remember this session for future admin actions."
+    )
 
 
 def authenticate_admin(ctx: FifaContext, args: AdminAuth) -> str:
-    """Check whether the provided admin secret is correct."""
+    """Check the admin secret and remember this session as admin if correct."""
     err = _require_admin(ctx, args.admin_secret)
     if err:
         return err
-    return "Verified: the admin secret is correct - you may manage the tournament."
+    return "Verified: you may manage the tournament (I'll remember this session)."
 
 
 def register_group(ctx: FifaContext, args: RegisterGroup) -> str:
@@ -588,16 +614,17 @@ TOOLSPECS: list[ToolSpec] = [
     # administrative
     ToolSpec(
         "authenticate_admin",
-        "Check whether an admin secret is correct. Call this whenever someone "
-        "offers the admin secret, and let the result decide - do not judge the "
-        "secret yourself.",
+        "Check whether an admin secret is correct and, if so, remember this "
+        "session as admin (so later admin tools need no secret). Call this "
+        "whenever someone offers the admin secret, and let the result decide - "
+        "do not judge the secret yourself.",
         AdminAuth,
         authenticate_admin,
     ),
     ToolSpec(
         "register_group",
-        "ADMIN: register or overwrite a group and the teams in it "
-        "(requires the admin secret).",
+        "ADMIN: register or overwrite a group and the teams in it. The admin "
+        "secret is only needed the first time this session acts as admin.",
         RegisterGroup,
         register_group,
     ),
@@ -610,28 +637,32 @@ TOOLSPECS: list[ToolSpec] = [
     ToolSpec(
         "load_schedule",
         "ADMIN: load the official match schedule (dated fixtures), replacing "
-        "any existing matches (requires the admin secret).",
+        "any existing matches. The admin secret is only needed the first time "
+        "this session acts as admin.",
         AdminAuth,
         load_schedule,
     ),
     ToolSpec(
         "clear_tournament",
-        "ADMIN: delete all registered groups and matches to redo setup "
-        "(requires the admin secret).",
+        "ADMIN: delete all registered groups and matches to redo setup. The "
+        "admin secret is only needed the first time this session acts as admin.",
         AdminAuth,
         clear_tournament,
     ),
     ToolSpec(
         "admin_set_prediction",
         "ADMIN: set or override any player's prediction for a specific match, "
-        "even after kickoff (requires the admin secret).",
+        "even after kickoff. The admin secret is only needed the first time this "
+        "session acts as admin.",
         AdminSetPrediction,
         admin_set_prediction,
     ),
     ToolSpec(
         "set_result",
         "ADMIN: record the actual final score of a match once it has been "
-        "played (requires the admin secret).",
+        "played. Just call it - the admin secret is only needed the first time "
+        "this session acts as admin; if not yet authorized the tool will say so "
+        "and you can ask for the secret then.",
         SetResult,
         set_result,
     ),
@@ -639,7 +670,8 @@ TOOLSPECS: list[ToolSpec] = [
         "link_device",
         "ADMIN: approve an extra session/device for a player (their first device "
         "claims the name for free; additional devices and cookie-clear recovery "
-        "need this). Requires the admin secret.",
+        "need this). The admin secret is only needed the first time this session "
+        "acts as admin.",
         LinkDevice,
         link_device,
     ),
