@@ -313,7 +313,12 @@ def list_groups(ctx: FifaContext, _args: NoArgs) -> str:
 
 
 def load_schedule(ctx: FifaContext, args: AdminAuth) -> str:
-    """Load the bundled match schedule, replacing any existing matches."""
+    """Add any bundled fixtures that aren't loaded yet, leaving existing ones be.
+
+    Matches already in the store are assumed correct and are never touched, so
+    recorded results can't be lost on reload. Only fixtures whose number isn't
+    present yet are inserted.
+    """
     err = _require_admin(ctx, args.admin_secret)
     if err:
         return err
@@ -322,23 +327,25 @@ def load_schedule(ctx: FifaContext, args: AdminAuth) -> str:
             data = json.load(handle)
     except (OSError, ValueError) as exc:
         return f"Could not read the bundled schedule: {exc}"
-    for match in list(ctx.store.get("match")):
-        ctx.store.delete(match)
+    if not data:
+        return "The bundled schedule is empty."
+    existing = {m.number for m in ctx.store.get("match")}
+    added = 0
     for entry in data:
+        number = int(entry["number"])
+        if number in existing:
+            continue
         ctx.store.put(
             memories.Match(
-                number=int(entry["number"]),
+                number=number,
                 stage=entry.get("stage", "group"),
                 home=entry["home"],
                 away=entry["away"],
                 kickoff=entry["kickoff"],
             )
         )
-    if not data:
-        return "The bundled schedule is empty."
-    first = min(e["kickoff"] for e in data)
-    last = max(e["kickoff"] for e in data)
-    return f"Loaded {len(data)} matches (from {first} to {last})."
+        added += 1
+    return f"Added {added} new match(es); {len(existing)} already loaded."
 
 
 def clear_tournament(ctx: FifaContext, args: AdminAuth) -> str:
@@ -636,9 +643,9 @@ TOOLSPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         "load_schedule",
-        "ADMIN: load the official match schedule (dated fixtures), replacing "
-        "any existing matches. The admin secret is only needed the first time "
-        "this session acts as admin.",
+        "ADMIN: add any official fixtures (dated) that aren't loaded yet, "
+        "leaving existing matches and their results untouched. The admin secret "
+        "is only needed the first time this session acts as admin.",
         AdminAuth,
         load_schedule,
     ),
