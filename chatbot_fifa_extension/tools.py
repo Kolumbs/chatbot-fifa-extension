@@ -29,7 +29,7 @@ from .context import FifaContext
 
 
 SCHEDULE_FILE = os.path.join(
-    os.path.dirname(__file__), "data", "wc2026_group_schedule.json"
+    os.path.dirname(__file__), "data", "wc2026_schedule.json"
 )
 
 

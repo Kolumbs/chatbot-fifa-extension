@@ -70,5 +70,21 @@
   {"number": 69, "stage": "group", "home": "Colombia", "away": "Portugal", "kickoff": "2026-06-27T23:30:00+00:00"},
   {"number": 70, "stage": "group", "home": "DR Congo", "away": "Uzbekistan", "kickoff": "2026-06-27T23:30:00+00:00"},
   {"number": 71, "stage": "group", "home": "Algeria", "away": "Austria", "kickoff": "2026-06-28T02:00:00+00:00"},
-  {"number": 72, "stage": "group", "home": "Jordan", "away": "Argentina", "kickoff": "2026-06-28T02:00:00+00:00"}
+  {"number": 72, "stage": "group", "home": "Jordan", "away": "Argentina", "kickoff": "2026-06-28T02:00:00+00:00"},
+  {"number": 73, "stage": "round32", "home": "South Africa", "away": "Canada", "kickoff": "2026-06-28T19:00:00+00:00"},
+  {"number": 74, "stage": "round32", "home": "Germany", "away": "Paraguay", "kickoff": "2026-06-29T20:30:00+00:00"},
+  {"number": 75, "stage": "round32", "home": "Netherlands", "away": "Morocco", "kickoff": "2026-06-30T01:00:00+00:00"},
+  {"number": 76, "stage": "round32", "home": "Brazil", "away": "Japan", "kickoff": "2026-06-29T17:00:00+00:00"},
+  {"number": 77, "stage": "round32", "home": "France", "away": "Sweden", "kickoff": "2026-06-30T21:00:00+00:00"},
+  {"number": 78, "stage": "round32", "home": "Ivory Coast", "away": "Norway", "kickoff": "2026-06-30T17:00:00+00:00"},
+  {"number": 79, "stage": "round32", "home": "Mexico", "away": "Ecuador", "kickoff": "2026-07-01T01:00:00+00:00"},
+  {"number": 80, "stage": "round32", "home": "England", "away": "DR Congo", "kickoff": "2026-07-01T16:00:00+00:00"},
+  {"number": 81, "stage": "round32", "home": "United States", "away": "Bosnia & Herzegovina", "kickoff": "2026-07-02T00:00:00+00:00"},
+  {"number": 82, "stage": "round32", "home": "Belgium", "away": "Senegal", "kickoff": "2026-07-01T20:00:00+00:00"},
+  {"number": 83, "stage": "round32", "home": "Portugal", "away": "Croatia", "kickoff": "2026-07-02T23:00:00+00:00"},
+  {"number": 84, "stage": "round32", "home": "Spain", "away": "Austria", "kickoff": "2026-07-02T19:00:00+00:00"},
+  {"number": 85, "stage": "round32", "home": "Switzerland", "away": "Algeria", "kickoff": "2026-07-03T03:00:00+00:00"},
+  {"number": 86, "stage": "round32", "home": "Argentina", "away": "Cape Verde", "kickoff": "2026-07-03T22:00:00+00:00"},
+  {"number": 87, "stage": "round32", "home": "Colombia", "away": "Ghana", "kickoff": "2026-07-04T01:30:00+00:00"},
+  {"number": 88, "stage": "round32", "home": "Australia", "away": "Egypt", "kickoff": "2026-07-03T18:00:00+00:00"}
 ]
