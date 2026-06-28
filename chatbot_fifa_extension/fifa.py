@@ -512,7 +512,7 @@ class WorldCup:
         result = [int(i) for i in result]
         for i, bet in enumerate(self.player.bets):
             if not bet[1]:
-                if i > 48 and result[0] == result[1]:
+                if i >= 48 and result[0] == result[1]:
                     raise DrawNotAllowed("Draws are not allowed in knockout stages")
                 bet[1] = result
                 self.player.next_bet = ""
